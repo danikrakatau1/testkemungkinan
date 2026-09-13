@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#060913" />
-  <meta name="description" content="Dashboard eksperimen statistik 3 digit: ranking Top 10, Top 3, statistik posisi, dan rolling backtest tanpa future leak." />
-  <title>Test Kemungkinan 3D · V0.2</title>
+  <meta name="description" content="Dashboard eksperimen statistik 3 digit: live collector, ranking Top 10, Top 3, statistik posisi, dan rolling backtest tanpa future leak." />
+  <title>Test Kemungkinan 3D · V0.3</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -15,7 +15,7 @@
         <div class="brand-mark">3D</div>
         <div class="brand-text">Test Kemungkinan</div>
       </div>
-      <div class="status"><span class="status-dot"></span> V0.2 · Worker live</div>
+      <div class="status"><span class="status-dot"></span> V0.3 · Collector live</div>
     </header>
 
     <main>
@@ -23,7 +23,7 @@
         <article class="hero-copy">
           <p class="eyebrow">Statistical Ranking Lab</p>
           <h1>Analyzer 3 Digit.</h1>
-          <p class="lead">Masukkan riwayat hasil dari yang paling baru ke paling lama. Engine memberi skor seluruh kandidat 000–999, menyusun Top 10, memilih Top 3, lalu dapat diuji ulang dengan rolling backtest tanpa melihat data masa depan.</p>
+          <p class="lead">Ambil histori 3D langsung dari source atau masukkan manual. Engine memberi skor seluruh kandidat 000–999, menyusun Top 10, memilih Top 3, lalu dapat diuji ulang dengan rolling backtest tanpa melihat data masa depan.</p>
           <div class="warning"><span>◇</span><span>Skor di dashboard adalah <strong>ranking relatif, bukan probabilitas kemenangan</strong>. Jika sumber hasil benar-benar acak, pola historis tidak menjamin hasil berikutnya.</span></div>
         </article>
 
@@ -34,7 +34,7 @@
           </div>
           <div class="quick-meta">
             <div class="meta-box"><span>Data aktif</span><strong id="drawCount">0</strong></div>
-            <div class="meta-box"><span>Model</span><strong id="modelName">V0.2</strong></div>
+            <div class="meta-box"><span>Model</span><strong id="modelName">V0.3</strong></div>
           </div>
         </aside>
       </section>
@@ -49,12 +49,16 @@
             <span class="small-badge">000–999</span>
           </div>
 
-          <textarea id="historyInput" inputmode="numeric" spellcheck="false" aria-label="Riwayat angka 3 digit"></textarea>
-          <p class="hint">Boleh dipisahkan dengan baris baru, spasi, koma, atau titik koma. Angka seperti 007 tetap dipertahankan sebagai tiga digit.</p>
+          <div class="warning" id="collectorStatus"><span>◎</span><span><strong>Live collector siap.</strong> Ambil 5 halaman terbaru (±30 draw) langsung dari source.</span></div>
           <div class="input-actions">
+            <button class="text-btn" id="liveBtn" type="button">Ambil Live 30</button>
+            <button class="text-btn" id="syncBtn" type="button">Sync Collector</button>
             <button class="text-btn" id="sampleBtn" type="button">Muat contoh</button>
             <button class="text-btn" id="clearBtn" type="button">Kosongkan</button>
           </div>
+
+          <textarea id="historyInput" inputmode="numeric" spellcheck="false" aria-label="Riwayat angka 3 digit"></textarea>
+          <p class="hint">Boleh dipisahkan dengan baris baru, spasi, koma, atau titik koma. Angka seperti 007 tetap dipertahankan sebagai tiga digit.</p>
 
           <div class="controls">
             <div class="field">
@@ -143,7 +147,7 @@
 
     <footer>
       <span>Standalone project · danikrakatau1/testkemungkinan</span>
-      <span>V0.2 · analyzer + backtest dashboard</span>
+      <span>V0.3 · live collector + analyzer + backtest</span>
     </footer>
   </div>
 
