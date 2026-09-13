@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#060913" />
+  <title>Engine Parity Audit · V0.6.4</title>
+  <style>
+    :root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#060913;color:#eef2ff}
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 15% 0%,#101a38 0,transparent 34%),#060913;min-height:100vh}
+    .shell{width:min(1120px,calc(100% - 32px));margin:0 auto;padding:28px 0 64px}.top{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:24px}.brand{font-weight:800;font-size:20px}.badge{border:1px solid #26324c;border-radius:999px;padding:7px 11px;color:#b8c3dd;font-size:12px}.panel{background:rgba(12,18,34,.92);border:1px solid #27324a;border-radius:22px;padding:22px;box-shadow:0 20px 70px rgba(0,0,0,.22);margin-bottom:18px}.eyebrow{text-transform:uppercase;letter-spacing:.14em;color:#8291b0;font-size:11px;font-weight:800}.title{font-size:clamp(28px,4vw,46px);margin:8px 0 10px}.lead{color:#9ba8c3;line-height:1.65;max-width:820px}.warn{margin-top:16px;padding:13px 15px;border:1px solid rgba(245,158,11,.26);border-radius:14px;background:rgba(245,158,11,.055);color:#c8d0e3;font-size:13px;line-height:1.5}.controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px}.field{display:flex;flex-direction:column;gap:7px}.field label{font-size:11px;color:#7f8eac;text-transform:uppercase;letter-spacing:.08em}.field input{width:100%;border:1px solid #293551;background:#080e1c;color:#f4f6ff;border-radius:12px;padding:12px}.btn{border:0;border-radius:13px;padding:13px 18px;font-weight:800;cursor:pointer;background:linear-gradient(135deg,#7188ff,#8c6cf2);color:white}.btn:disabled{opacity:.55;cursor:wait}.status{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:18px}.metric{border:1px solid #25304a;background:#0a1020;border-radius:15px;padding:14px}.metric span{display:block;color:#72809e;font-size:11px}.metric strong{display:block;font-size:22px;margin-top:6px}.result-head{display:flex;justify-content:space-between;gap:16px;align-items:center}.verdict{font-size:22px;font-weight:900}.pass{color:#64e6b1}.fail{color:#ff8891}.running{color:#8eb2ff}.table-wrap{overflow:auto;margin-top:15px;border:1px solid #222d45;border-radius:15px}table{width:100%;border-collapse:collapse;min-width:850px}th,td{padding:13px 14px;text-align:left;border-bottom:1px solid #1d2840;font-size:12px}th{color:#7383a5;text-transform:uppercase;letter-spacing:.08em;font-size:10px;background:#0c1325}td{color:#d8def0}.mono{font-family:"SFMono-Regular",Consolas,monospace}.pill{display:inline-flex;border:1px solid #34415e;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800}.pill.pass{border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.08)}.pill.fail{border-color:rgba(248,113,113,.35);background:rgba(248,113,113,.08)}pre{white-space:pre-wrap;word-break:break-word;background:#070c17;border:1px solid #222d45;border-radius:14px;padding:14px;color:#bac5de;max-height:320px;overflow:auto}.small{font-size:12px;color:#8492ad}.links{display:flex;gap:10px;flex-wrap:wrap}.links a{color:#a8b6ff;text-decoration:none;border:1px solid #2c3855;border-radius:10px;padding:8px 10px;font-size:12px}@media(max-width:760px){.controls,.status{grid-template-columns:1fr 1fr}.top{align-items:flex-start;flex-direction:column}}@media(max-width:480px){.controls,.status{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="top"><div class="brand">Test Kemungkinan · Engine Lab</div><div class="badge">V0.6.4 · Parity Audit</div></div>
+    <section class="panel">
+      <div class="eyebrow">Frozen-input verification</div>
+      <h1 class="title">Production vs Reference Engine.</h1>
+      <p class="lead">Audit ini mengambil satu snapshot histori D1, membekukannya di browser, lalu menjalankan production engine dan frozen reference engine pada slice yang persis sama. PASS hanya jika weights, calibration summary, holdout ranks, gate, dan current Top 3 identik.</p>
+      <div class="warn"><strong>Tujuan audit:</strong> mendeteksi math drift. Hasil parity bukan bukti bahwa pola memprediksi draw berikutnya; ini hanya memastikan dua implementasi melakukan matematika yang sama.</div>
+      <div class="controls">
+        <div class="field"><label>History limit</label><input id="limit" type="number" value="300" min="120" max="500" /></div>
+        <div class="field"><label>Decay</label><input id="decay" type="number" value="0.90" min="0.50" max="1" step="0.01" /></div>
+        <div class="field"><label>Min train</label><input id="minTrain" type="number" value="8" min="3" max="80" /></div>
+        <div class="field"><label>Audit windows</label><input id="windows" type="number" value="2" min="1" max="3" /></div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap"><button id="run" class="btn">Run Parity Audit</button><div class="links"><a href="/">Dashboard utama</a><a href="/api/health" target="_blank" rel="noreferrer">API health</a></div></div>
+      <div class="status">
+        <div class="metric"><span>Snapshot draws</span><strong id="draws">—</strong></div>
+        <div class="metric"><span>Snapshot fingerprint</span><strong id="fingerprint" class="mono" style="font-size:14px">—</strong></div>
+        <div class="metric"><span>Overall parity</span><strong id="overall">WAIT</strong></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="result-head"><div><div class="eyebrow">Audit result</div><div id="headline" class="verdict">Belum dijalankan</div></div><div id="progress" class="small"></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Window</th><th>Offset</th><th>Production</th><th>Reference</th><th>Weights</th><th>Holdout ranks</th><th>Current Top 3</th><th>Parity</th></tr></thead><tbody id="body"></tbody></table></div>
+      <div style="margin-top:16px"><div class="eyebrow">First differences</div><pre id="diff">Audit belum dijalankan.</pre></div>
+    </section>
+  </main>
+
+  <script type="module">
+    const WINDOW_TARGETS = 18;
+    const $ = (id) => document.getElementById(id);
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    async function jsonFetch(url, options = {}, attempt = 0) {
+      const started = performance.now();
+      const response = await fetch(url, options);
+      const data = await response.json().catch(() => ({}));
+      const ms = performance.now() - started;
+      if (response.ok && data.ok) return { data, ms };
+      if (response.status === 503 && attempt < 2) {
+        await sleep(900 * (attempt + 1));
+        return jsonFetch(url, options, attempt + 1);
+      }
+      throw new Error(data.error || `Request gagal (${response.status})`);
+    }
+
+    function pickEngineOutput(data) {
+      const calibration = (data.calibration || []).map((row) => ({
+        id: row.id,
+        trials: row.trials,
+        top3Hits: row.top3Hits,
+        top10Hits: row.top10Hits,
+        top25Hits: row.top25Hits,
+        meanTargetRank: row.meanTargetRank,
+      }));
+      return {
+        gate: { passed: data.gate?.passed, status: data.gate?.status },
+        weights: (data.weights || []).map((row) => ({ id: row.id, weight: row.weight, weightPct: row.weightPct })),
+        calibration,
+        holdoutWeighted: {
+          trials: data.holdout?.weighted?.trials,
+          top3Hits: data.holdout?.weighted?.top3Hits,
+          top10Hits: data.holdout?.weighted?.top10Hits,
+          top25Hits: data.holdout?.weighted?.top25Hits,
+          meanTargetRank: data.holdout?.weighted?.meanTargetRank,
+          meanRankDelta: data.holdout?.weighted?.evidence?.meanRankDelta,
+          pValues: data.holdout?.weighted?.evidence?.pValues,
+        },
+        holdoutBorda: {
+          trials: data.holdout?.borda?.trials,
+          top3Hits: data.holdout?.borda?.top3Hits,
+          top10Hits: data.holdout?.borda?.top10Hits,
+          top25Hits: data.holdout?.borda?.top25Hits,
+          meanTargetRank: data.holdout?.borda?.meanTargetRank,
+        },
+        trials: (data.holdout?.trials || []).map((row) => ({ target: row.target, weightedRank: row.weightedRank, bordaRank: row.bordaRank, trainingDraws: row.trainingDraws })),
+        top3: (data.currentWeighted?.top3 || []).map((row) => ({ rank: row.rank, number: row.number, score: row.score })),
+      };
+    }
+
+    function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+    function flatten(value, prefix = "", out = {}) {
+      if (Array.isArray(value)) {
+        value.forEach((item, index) => flatten(item, `${prefix}[${index}]`, out));
+      } else if (value && typeof value === "object") {
+        Object.keys(value).sort().forEach((key) => flatten(value[key], prefix ? `${prefix}.${key}` : key, out));
+      } else {
+        out[prefix] = value;
+      }
+      return out;
+    }
+
+    function findDiffs(a, b, limit = 12) {
+      const left = flatten(a); const right = flatten(b);
+      const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+      const diffs = [];
+      for (const key of keys) {
+        if (JSON.stringify(left[key]) !== JSON.stringify(right[key])) {
+          diffs.push({ path: key, production: left[key], reference: right[key] });
+          if (diffs.length >= limit) break;
+        }
+      }
+      return diffs;
+    }
+
+    async function fingerprint(history) {
+      const bytes = new TextEncoder().encode(JSON.stringify(history));
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function pill(pass) { return `<span class="pill ${pass ? "pass" : "fail"}">${pass ? "PASS" : "FAIL"}</span>`; }
+
+    async function run() {
+      const button = $("run"); button.disabled = true; button.textContent = "Running…";
+      $("headline").textContent = "Membekukan snapshot D1…"; $("headline").className = "verdict running";
+      $("overall").textContent = "RUN"; $("overall").className = "running"; $("body").innerHTML = ""; $("diff").textContent = "";
+      try {
+        const limit = Math.max(120, Math.min(500, Number($("limit").value || 300)));
+        const historyResponse = await jsonFetch(`/api/history?limit=${limit}`);
+        const history = historyResponse.data.history || [];
+        if (history.length < 120) throw new Error("Histori D1 terlalu pendek untuk parity audit.");
+        const hash = await fingerprint(history);
+        $("draws").textContent = history.length; $("fingerprint").textContent = hash.slice(0, 16);
+
+        const windowCount = Math.max(1, Math.min(3, Number($("windows").value || 2)));
+        const decay = Number($("decay").value || 0.9);
+        const minTrain = Number($("minTrain").value || 8);
+        const rows = []; const allDiffs = [];
+
+        for (let index = 0; index < windowCount; index += 1) {
+          const offset = index * WINDOW_TARGETS;
+          const frozenSlice = history.slice(offset);
+          const payload = JSON.stringify({ history: frozenSlice, decay, minTrain });
+          $("progress").textContent = `Window ${index + 1}/${windowCount} · production`;
+          const production = await jsonFetch("/api/validate-window", { method: "POST", headers: { "content-type": "application/json" }, body: payload });
+          await sleep(500);
+          $("progress").textContent = `Window ${index + 1}/${windowCount} · reference`;
+          const reference = await jsonFetch("/api/validate-window-reference", { method: "POST", headers: { "content-type": "application/json" }, body: payload });
+
+          const p = pickEngineOutput(production.data); const r = pickEngineOutput(reference.data);
+          const weightsPass = same(p.weights, r.weights);
+          const holdoutPass = same(p.trials, r.trials) && same(p.holdoutWeighted, r.holdoutWeighted) && same(p.holdoutBorda, r.holdoutBorda);
+          const top3Pass = same(p.top3, r.top3);
+          const fullPass = same(p, r);
+          const diffs = findDiffs(p, r);
+          if (diffs.length) allDiffs.push(...diffs.map((d) => ({ window: `W${index + 1}`, ...d })));
+          rows.push({ index, offset, productionMs: production.ms, referenceMs: reference.ms, weightsPass, holdoutPass, top3Pass, fullPass });
+          await sleep(500);
+        }
+
+        $("body").innerHTML = rows.map((row) => `<tr><td>W${row.index + 1}</td><td class="mono">${row.offset}–${row.offset + 17}</td><td class="mono">${row.productionMs.toFixed(0)} ms</td><td class="mono">${row.referenceMs.toFixed(0)} ms</td><td>${pill(row.weightsPass)}</td><td>${pill(row.holdoutPass)}</td><td>${pill(row.top3Pass)}</td><td>${pill(row.fullPass)}</td></tr>`).join("");
+        const overallPass = rows.every((row) => row.fullPass);
+        $("overall").textContent = overallPass ? "PASS" : "FAIL"; $("overall").className = overallPass ? "pass" : "fail";
+        $("headline").textContent = overallPass ? "PARITY PASS · matematika identik pada frozen input" : "PARITY FAIL · ada math drift";
+        $("headline").className = `verdict ${overallPass ? "pass" : "fail"}`;
+        $("progress").textContent = `${windowCount} window audited · fingerprint ${hash.slice(0, 16)}`;
+        $("diff").textContent = allDiffs.length ? allDiffs.slice(0, 20).map((d) => `${d.window} ${d.path}\n  production: ${JSON.stringify(d.production)}\n  reference : ${JSON.stringify(d.reference)}`).join("\n\n") : "Tidak ada perbedaan pada field yang diaudit.";
+      } catch (error) {
+        $("headline").textContent = `Audit gagal: ${error.message || error}`; $("headline").className = "verdict fail"; $("overall").textContent = "ERROR"; $("overall").className = "fail"; $("diff").textContent = String(error.stack || error);
+      } finally {
+        button.disabled = false; button.textContent = "Run Parity Audit";
+      }
+    }
+
+    $("run").addEventListener("click", run);
+  </script>
+</body>
+</html>
