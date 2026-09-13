@@ -8,6 +8,11 @@ import { validateWeightedEnsemble } from "./validation.js";
 import { validateWalkForwardWindow } from "./validation_window.js";
 import { validateWalkForwardWindowReference } from "./validation_window_reference.js";
 import {
+  listExperiments,
+  readExperiment,
+  saveExperiment,
+} from "./experiments.js";
+import {
   backfillOlderResults,
   collectAndPersist,
   fetchRecentResults,
@@ -95,6 +100,36 @@ async function handleValidationWindowReference(request) {
   }
 }
 
+async function handleExperiments(request, url, env) {
+  if (!env?.DB) {
+    return json({ ok: false, storageConfigured: false, error: "D1 binding DB diperlukan untuk Experiment Lock." }, 503);
+  }
+
+  try {
+    if (request.method === "POST") {
+      const body = await readJson(request);
+      const experiment = await saveExperiment(env.DB, body);
+      return json({ ok: true, experiment });
+    }
+
+    if (request.method === "GET") {
+      const rawId = Number(url.searchParams.get("id") || 0);
+      if (Number.isInteger(rawId) && rawId > 0) {
+        const experiment = await readExperiment(env.DB, rawId);
+        if (!experiment) return json({ ok: false, error: "Experiment tidak ditemukan." }, 404);
+        return json({ ok: true, experiment });
+      }
+      const limit = Number(url.searchParams.get("limit") || 20);
+      const experiments = await listExperiments(env.DB, limit);
+      return json({ ok: true, count: experiments.length, experiments });
+    }
+
+    return json({ ok: false, error: "Gunakan GET atau POST." }, 405);
+  } catch (error) {
+    return json({ ok: false, error: error?.message || "Experiment Lock gagal." }, 400);
+  }
+}
+
 function pagesFromUrl(url, fallback = 5) {
   const raw = Number(url.searchParams.get("pages") ?? fallback);
   if (!Number.isInteger(raw)) return fallback;
@@ -170,6 +205,30 @@ async function handleStoredHistory(url, env) {
   }
 }
 
+async function serveAsset(request, env, url) {
+  const response = await env.ASSETS.fetch(request);
+  if (request.method !== "GET" || !response.ok) return response;
+  if (url.pathname !== "/" && url.pathname !== "/index.html") return response;
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("text/html")) return response;
+
+  let html = await response.text();
+  if (!html.includes("/v065.js")) {
+    const marker = '<script type="module" src="/v06.js"></script>';
+    if (html.includes(marker)) {
+      html = html.replace(marker, `<script type="module" src="/v065.js"></script>\n  ${marker}`);
+    } else {
+      html = html.replace("</body>", '  <script type="module" src="/v065.js"></script>\n</body>');
+    }
+  }
+
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.set("cache-control", "no-store");
+  return new Response(html, { status: response.status, headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -178,10 +237,10 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.6.4",
+        version: "0.6.5",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
-        validation: "V0.5.4 single-window + V0.6.3 production walk-forward + V0.6.2 regime diagnostics + V0.6.4 frozen parity reference",
+        validation: "V0.5.4 single-window + V0.6.3 production walk-forward + V0.6.2 regime diagnostics + V0.6.4 parity + V0.6.5 reproducible experiment lock",
         multiWindowValidation: {
           defaultWindows: 8,
           targetsPerWindow: 18,
@@ -196,6 +255,12 @@ export default {
           referenceEndpoint: "/api/validate-window-reference",
           rule: "same frozen history slice + same options must produce identical weights, holdout ranks, summary, gate, and current Top3",
           purpose: "detect math drift before any optimization is trusted",
+        },
+        experimentLock: {
+          endpoint: "/api/experiments",
+          storage: "D1 experiment_runs",
+          behavior: "completed multi-window runs are fingerprinted, deduplicated, persisted, and replayable from the frozen snapshot",
+          version: "0.6.5",
         },
         regimeAnalysis: {
           requestCost: "none beyond multi-window run",
@@ -216,6 +281,7 @@ export default {
           "/api/validate",
           "/api/validate-window",
           "/api/validate-window-reference",
+          "/api/experiments",
           "/api/source?pages=5",
           "/api/collect",
           "/api/backfill",
@@ -227,7 +293,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.6.4", models: listModels() });
+      return json({ ok: true, version: "0.6.5", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
@@ -260,6 +326,10 @@ export default {
       return handleValidationWindowReference(request);
     }
 
+    if (url.pathname === "/api/experiments") {
+      return handleExperiments(request, url, env);
+    }
+
     if (url.pathname === "/api/source") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
       return handleLiveSource(url);
@@ -284,7 +354,7 @@ export default {
       return json({ ok: false, error: "API endpoint tidak ditemukan." }, 404);
     }
 
-    return env.ASSETS.fetch(request);
+    return serveAsset(request, env, url);
   },
 
   async scheduled(_event, env, ctx) {
