@@ -6,6 +6,7 @@ import {
 } from "../src/analyzer.js";
 import { validateWeightedEnsemble } from "../src/validation.js";
 import { validateWalkForwardWindow } from "../src/validation_window.js";
+import { validateWalkForwardWindowReference } from "../src/validation_window_reference.js";
 import { parseResultPage } from "../src/collector.js";
 
 const history = [
@@ -23,6 +24,7 @@ const backtest = backtestHistory(history, { decay: 0.9, modelId: "balanced", min
 const comparison = compareModels(history, { decay: 0.9, minTrain: 8, maxTrials: 20 });
 const validation = validateWeightedEnsemble(validationHistory, { decay: 0.9, minTrain: 8, maxTrials: 30, holdoutTrials: 10 });
 const windowValidation = validateWalkForwardWindow(validationHistory, { decay: 0.9, minTrain: 8 });
+const referenceValidation = validateWalkForwardWindowReference(validationHistory, { decay: 0.9, minTrain: 8 });
 const models = listModels();
 
 if (analysis.top3.length !== 3 || analysis.top10.length !== 10) throw new Error("Analyzer ranking length invalid.");
@@ -49,7 +51,48 @@ if (
   Math.abs(windowWeightSum - 1) > 0.01 ||
   windowValidation.currentWeighted.top3.length !== 3 ||
   windowValidation.holdout.trials.length !== 6
-) throw new Error("Lightweight walk-forward window output invalid.");
+) throw new Error("Walk-forward window output invalid.");
+
+function parityShape(result) {
+  return {
+    gate: { passed: result.gate?.passed, status: result.gate?.status },
+    weights: (result.weights || []).map((row) => ({ id: row.id, weight: row.weight, weightPct: row.weightPct })),
+    calibration: (result.calibration || []).map((row) => ({
+      id: row.id,
+      trials: row.trials,
+      top3Hits: row.top3Hits,
+      top10Hits: row.top10Hits,
+      top25Hits: row.top25Hits,
+      meanTargetRank: row.meanTargetRank,
+    })),
+    holdoutWeighted: {
+      trials: result.holdout?.weighted?.trials,
+      top3Hits: result.holdout?.weighted?.top3Hits,
+      top10Hits: result.holdout?.weighted?.top10Hits,
+      top25Hits: result.holdout?.weighted?.top25Hits,
+      meanTargetRank: result.holdout?.weighted?.meanTargetRank,
+      meanRankDelta: result.holdout?.weighted?.evidence?.meanRankDelta,
+      pValues: result.holdout?.weighted?.evidence?.pValues,
+    },
+    holdoutBorda: {
+      trials: result.holdout?.borda?.trials,
+      top3Hits: result.holdout?.borda?.top3Hits,
+      top10Hits: result.holdout?.borda?.top10Hits,
+      top25Hits: result.holdout?.borda?.top25Hits,
+      meanTargetRank: result.holdout?.borda?.meanTargetRank,
+    },
+    trials: (result.holdout?.trials || []).map((row) => ({
+      target: row.target,
+      weightedRank: row.weightedRank,
+      bordaRank: row.bordaRank,
+      trainingDraws: row.trainingDraws,
+    })),
+    top3: (result.currentWeighted?.top3 || []).map((row) => ({ rank: row.rank, number: row.number, score: row.score })),
+  };
+}
+
+const parityPass = JSON.stringify(parityShape(windowValidation)) === JSON.stringify(parityShape(referenceValidation));
+if (!parityPass) throw new Error("Walk-forward production/reference parity drift detected.");
 
 const collectorFixture = `
   <div>Sunday, September 13, 2026</div>
@@ -71,7 +114,7 @@ if (parsed.length !== 2 || parsed[0].period !== 25532 || parsed[0].result !== "5
 
 console.log(JSON.stringify({
   ok: true,
-  version: "0.6.2",
+  version: "0.6.4",
   newest: analysis.history.newest,
   top3: analysis.top3.map((row) => row.number),
   backtestTrials: backtest.summary.trials,
@@ -79,7 +122,8 @@ console.log(JSON.stringify({
   validationSplit: `${validation.meta.calibrationTrials}+${validation.meta.holdoutTrials}`,
   walkForwardSplit: `${windowValidation.meta.calibrationTrials}+${windowValidation.meta.holdoutTrials}`,
   walkForwardTrainingWindow: windowValidation.meta.trainingWindowDraws,
-  regimeDiagnostics: "client-side from completed multi-window results",
+  engineParity: parityPass ? "PASS" : "FAIL",
+  parityAuditPage: "/parity.html",
   models: models.map((model) => model.id),
   collectorFixture: parsed.map((row) => `${row.period}:${row.result}`),
 }, null, 2));
