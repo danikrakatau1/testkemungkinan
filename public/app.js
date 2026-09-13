@@ -12,6 +12,7 @@ const els = {
   analyzeBtn: document.querySelector("#analyzeBtn"),
   backtestBtn: document.querySelector("#backtestBtn"),
   labBtn: document.querySelector("#labBtn"),
+  validateBtn: document.querySelector("#validateBtn"),
   liveBtn: document.querySelector("#liveBtn"),
   syncBtn: document.querySelector("#syncBtn"),
   storedBtn: document.querySelector("#storedBtn"),
@@ -30,10 +31,17 @@ const els = {
   backtestBody: document.querySelector("#backtestBody"),
   backtestEmpty: document.querySelector("#backtestEmpty"),
   backtestModel: document.querySelector("#backtestModel"),
+  backtestBaseline: document.querySelector("#backtestBaseline"),
   leaderboardBody: document.querySelector("#leaderboardBody"),
   leaderboardEmpty: document.querySelector("#leaderboardEmpty"),
   leaderWinner: document.querySelector("#leaderWinner"),
   leaderboardMeta: document.querySelector("#leaderboardMeta"),
+  validationEmpty: document.querySelector("#validationEmpty"),
+  validationGate: document.querySelector("#validationGate"),
+  validationMetrics: document.querySelector("#validationMetrics"),
+  validationWeights: document.querySelector("#validationWeights"),
+  validationHoldout: document.querySelector("#validationHoldout"),
+  validationTop3: document.querySelector("#validationTop3"),
 };
 
 function parseHistory() {
@@ -66,7 +74,7 @@ function options() {
 }
 
 function setBusy(busy) {
-  [els.analyzeBtn, els.backtestBtn, els.labBtn, els.liveBtn, els.syncBtn, els.storedBtn]
+  [els.analyzeBtn, els.backtestBtn, els.labBtn, els.validateBtn, els.liveBtn, els.syncBtn, els.storedBtn]
     .filter(Boolean)
     .forEach((button) => { button.disabled = busy; });
   els.loading.classList.toggle("show", busy);
@@ -103,6 +111,13 @@ async function getJson(path) {
 function consensusText(row) {
   if (!row?.consensus) return "";
   return `<span class="consensus">Top10 vote ${row.consensus.top10Votes}/${row.consensus.models}</span>`;
+}
+
+function statusClass(status = "") {
+  if (status === "validated-edge" || status === "validated") return "evidence-good";
+  if (status === "promising") return "evidence-warn";
+  if (status === "below-random-rank" || status === "locked") return "evidence-bad";
+  return "evidence-neutral";
 }
 
 function renderTop3(rows = []) {
@@ -147,7 +162,7 @@ function renderDigitStats(byPosition = []) {
 function renderAnalysis(data) {
   els.newest.textContent = data.history.newest || "---";
   els.drawCount.textContent = String(data.history.draws ?? 0);
-  els.modelName.textContent = data.meta?.modelLabel || "V0.4";
+  els.modelName.textContent = data.meta?.modelLabel || "V0.5";
   renderTop3(data.top3);
   renderTop10(data.top10);
   renderDigitStats(data.history.byPosition);
@@ -155,14 +170,24 @@ function renderAnalysis(data) {
 
 function renderBacktest(data) {
   const s = data.summary;
+  const evidence = data.evidence;
   els.backtestEmpty.hidden = true;
   if (els.backtestModel) els.backtestModel.textContent = data.meta?.modelLabel || data.meta?.model || "Model";
   els.backtestMetrics.innerHTML = `
     <div class="metric"><span>Trials</span><strong>${s.trials}</strong></div>
-    <div class="metric"><span>Top 3 hit</span><strong>${s.top3HitRatePct.toFixed(2)}%</strong></div>
-    <div class="metric"><span>Top 10 hit</span><strong>${s.top10HitRatePct.toFixed(2)}%</strong></div>
-    <div class="metric"><span>Mean rank</span><strong>${s.meanTargetRank.toFixed(1)}</strong></div>
+    <div class="metric"><span>Top 3 hit</span><strong>${s.top3HitRatePct.toFixed(2)}%</strong><small>${s.top3Hits} hit</small></div>
+    <div class="metric"><span>Top 10 hit</span><strong>${s.top10HitRatePct.toFixed(2)}%</strong><small>${s.top10Hits} hit</small></div>
+    <div class="metric"><span>Mean rank</span><strong>${s.meanTargetRank.toFixed(1)}</strong><small>random 500.5</small></div>
+    <div class="metric"><span>Δ vs random</span><strong class="${evidence.meanRankDelta > 0 ? "hit" : "miss"}">${evidence.meanRankDelta > 0 ? "+" : ""}${evidence.meanRankDelta.toFixed(1)}</strong><small>lebih besar = lebih baik</small></div>
   `;
+
+  if (els.backtestBaseline) {
+    els.backtestBaseline.className = `baseline-banner ${statusClass(evidence.status)}`;
+    els.backtestBaseline.innerHTML = `
+      <strong>${evidence.label}</strong>
+      <span>Confidence evidence ${evidence.confidenceScore.toFixed(1)}/100 · p(mean rank) ${evidence.pValues.meanRank.toFixed(3)} · p(Top10) ${evidence.pValues.top10.toFixed(3)}. Bukan probabilitas hasil.</span>
+    `;
+  }
 
   els.backtestBody.innerHTML = data.trials.map((trial, index) => `
     <tr>
@@ -183,11 +208,12 @@ function renderLeaderboard(data) {
     els.leaderWinner.innerHTML = winner ? `
       <div><span>Model historis teratas</span><strong>${winner.label}</strong></div>
       <div><span>Leader score</span><strong>${winner.leaderScore.toFixed(2)}</strong></div>
+      <div><span>Baseline verdict</span><strong class="${statusClass(winner.evidence.status)}">${winner.evidence.label}</strong></div>
       <div><span>Current Top 3</span><strong class="mono">${winner.currentTop3.join(" · ")}</strong></div>
     ` : "";
   }
   if (els.leaderboardMeta) {
-    els.leaderboardMeta.textContent = `${data.meta.trials} rolling trials · ${data.meta.models} model · skor historis, bukan probabilitas`;
+    els.leaderboardMeta.textContent = `${data.meta.trials} rolling trials · ${data.meta.models} model · random mean rank 500.5 · skor historis, bukan probabilitas`;
   }
 
   els.leaderboardBody.innerHTML = data.leaderboard.map((row, index) => `
@@ -195,13 +221,63 @@ function renderLeaderboard(data) {
       <td class="rank-cell">#${index + 1}</td>
       <td><button class="model-link" type="button" data-model="${row.id}">${row.label}</button><div class="model-desc">${row.description}</div></td>
       <td class="mono"><strong>${row.leaderScore.toFixed(2)}</strong></td>
-      <td class="mono">${row.top3HitRatePct.toFixed(2)}%</td>
-      <td class="mono">${row.top10HitRatePct.toFixed(2)}%</td>
-      <td class="mono">${row.top25HitRatePct.toFixed(2)}%</td>
+      <td class="mono">${row.top3HitRatePct.toFixed(2)}% <span class="tiny-hit">(${row.top3Hits})</span></td>
+      <td class="mono">${row.top10HitRatePct.toFixed(2)}% <span class="tiny-hit">(${row.top10Hits})</span></td>
+      <td class="mono">${row.top25HitRatePct.toFixed(2)}% <span class="tiny-hit">(${row.top25Hits})</span></td>
       <td class="mono">${row.meanTargetRank.toFixed(1)}</td>
+      <td class="mono ${row.evidence.meanRankDelta > 0 ? "hit" : "miss"}">${row.evidence.meanRankDelta > 0 ? "+" : ""}${row.evidence.meanRankDelta.toFixed(1)}</td>
+      <td><span class="evidence-pill ${statusClass(row.evidence.status)}">${row.evidence.status}</span></td>
       <td class="mono current-top3">${row.currentTop3.join(" · ")}</td>
     </tr>
   `).join("");
+}
+
+function renderValidation(data) {
+  els.validationEmpty.hidden = true;
+  const gate = data.gate;
+  const weighted = data.holdout.weighted;
+  const borda = data.holdout.borda;
+
+  els.validationGate.className = `validation-gate ${gate.passed ? "gate-pass" : "gate-lock"}`;
+  els.validationGate.innerHTML = `
+    <div>
+      <span>Validation status</span>
+      <strong>${gate.label}</strong>
+      <p>${gate.reason}</p>
+    </div>
+    <div class="gate-confidence">
+      <span>Holdout evidence</span>
+      <strong>${weighted.evidence.confidenceScore.toFixed(1)}/100</strong>
+      <small>bukan win probability</small>
+    </div>
+  `;
+
+  els.validationMetrics.innerHTML = `
+    <div class="metric"><span>Calibration</span><strong>${data.meta.calibrationTrials}</strong><small>older targets</small></div>
+    <div class="metric"><span>Locked holdout</span><strong>${data.meta.holdoutTrials}</strong><small>newest targets</small></div>
+    <div class="metric"><span>Weighted Top10</span><strong>${weighted.top10HitRatePct.toFixed(2)}%</strong><small>${weighted.top10Hits} hit</small></div>
+    <div class="metric"><span>Weighted mean rank</span><strong>${weighted.meanTargetRank.toFixed(1)}</strong><small>Δ ${weighted.evidence.meanRankDelta > 0 ? "+" : ""}${weighted.evidence.meanRankDelta.toFixed(1)}</small></div>
+    <div class="metric"><span>p Top10</span><strong>${weighted.evidence.pValues.top10.toFixed(3)}</strong><small>gate ≤ 0.10</small></div>
+  `;
+
+  els.validationWeights.innerHTML = data.weights.map((row) => `
+    <div class="weight-row">
+      <span>${row.label}</span>
+      <div class="weight-track"><i style="width:${Math.max(2, row.weightPct)}%"></i></div>
+      <strong>${row.weightPct.toFixed(2)}%</strong>
+    </div>
+  `).join("");
+
+  els.validationHoldout.innerHTML = `
+    <div class="holdout-row"><span>Weighted Ensemble</span><strong>Top10 ${weighted.top10HitRatePct.toFixed(2)}%</strong><em>Mean #${weighted.meanTargetRank.toFixed(1)}</em></div>
+    <div class="holdout-row"><span>Equal Borda</span><strong>Top10 ${borda.top10HitRatePct.toFixed(2)}%</strong><em>Mean #${borda.meanTargetRank.toFixed(1)}</em></div>
+    <div class="holdout-row"><span>Random reference</span><strong>Top10 1.00%</strong><em>Mean #500.5</em></div>
+  `;
+
+  els.validationTop3.innerHTML = data.currentWeighted.top3
+    .map((row, index) => `<span><small>#${index + 1}</small>${row.number}</span>`)
+    .join("");
+  els.validationTop3.classList.toggle("weighted-locked", !gate.passed);
 }
 
 async function runAnalysis() {
@@ -248,6 +324,21 @@ async function runModelLab() {
     renderLeaderboard(data);
   } catch (error) {
     showError(error.message || "Model Lab gagal.");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runValidation() {
+  showError();
+  setBusy(true);
+  try {
+    const history = parseHistory();
+    const opts = options();
+    const data = await postJson("/api/validate", { history, ...opts });
+    renderValidation(data);
+  } catch (error) {
+    showError(error.message || "Validation Gate gagal.");
   } finally {
     setBusy(false);
   }
@@ -309,9 +400,9 @@ async function loadStoredHistory({ quiet = false } = {}) {
 async function syncCollector() {
   showError();
   setBusy(true);
-  setCollectorStatus("mengambil hingga 10 halaman dan menyimpan period baru ke D1…", "Sync collector");
+  setCollectorStatus("mengambil hingga 20 halaman dan menyimpan period baru ke D1…", "Sync collector");
   try {
-    const data = await postJson("/api/collect", { pages: 10 });
+    const data = await postJson("/api/collect", { pages: 20 });
     if (data.storage?.configured) {
       const stored = await getJson("/api/history?limit=500");
       els.historyInput.value = stored.history.join("\n");
@@ -352,6 +443,7 @@ async function loadModels() {
 els.analyzeBtn.addEventListener("click", runAnalysis);
 els.backtestBtn.addEventListener("click", runBacktest);
 els.labBtn?.addEventListener("click", runModelLab);
+els.validateBtn?.addEventListener("click", runValidation);
 els.liveBtn?.addEventListener("click", loadLiveSource);
 els.syncBtn?.addEventListener("click", syncCollector);
 els.storedBtn?.addEventListener("click", () => loadStoredHistory());
