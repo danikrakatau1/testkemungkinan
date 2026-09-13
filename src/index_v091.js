@@ -1,4 +1,6 @@
 import baseWorker from "./index_v090.js";
+import { runAutoPilot } from "./autopilot.js";
+import { runTwoStagePilot } from "./two_stage_forward.js";
 import { runKeeper7Pilot } from "./keeper7_forward.js";
 
 const VERSION = "0.9.1";
@@ -47,6 +49,7 @@ async function upgradedHealth(request, env, ctx) {
     ...(data.performance || {}),
     visualMode: "SAFE",
     keeper7Endpoint: "separate from core /api/autopilot",
+    scheduledOrder: "collector/core locks -> Two-Stage lock -> Keeper7 lock",
     note: "V0.9.1 keeps heavy visual layers disabled and computes Keeper7 independently so the dashboard stays responsive."
   };
   data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/keeper7"]));
@@ -86,10 +89,15 @@ export default {
     return injectV091(request, response);
   },
 
-  async scheduled(event, env, ctx) {
-    if (baseWorker.scheduled) await baseWorker.scheduled(event, env, ctx);
-    ctx.waitUntil(runKeeper7Pilot(env).catch((error) => {
-      console.error("V0.9.1 Keeper7 scheduled pipeline failed", error);
-    }));
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil((async () => {
+      try {
+        await runAutoPilot(env, { collect: true });
+        await runTwoStagePilot(env);
+        await runKeeper7Pilot(env);
+      } catch (error) {
+        console.error("V0.9.1 scheduled pipeline failed", error);
+      }
+    })());
   },
 };
