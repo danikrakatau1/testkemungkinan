@@ -5,7 +5,12 @@ import {
   listModels,
 } from "./analyzer.js";
 import { validateWeightedEnsemble } from "./validation.js";
-import { collectAndPersist, fetchRecentResults, readStoredResults } from "./collector.js";
+import {
+  backfillOlderResults,
+  collectAndPersist,
+  fetchRecentResults,
+  readStoredResults,
+} from "./collector.js";
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -100,6 +105,26 @@ async function handleCollect(request, env) {
   }
 }
 
+async function handleBackfill(request, env) {
+  if (!env?.DB) {
+    return json({ ok: false, error: "D1 binding DB diperlukan untuk backfill." }, 503);
+  }
+
+  try {
+    const body = await readJson(request).catch(() => ({}));
+    const pages = Math.min(10, Math.max(1, Number(body?.pages) || 5));
+    const data = await backfillOlderResults(env, { pages });
+    return json({
+      ok: true,
+      mode: "older-history-backfill",
+      ...data,
+      history: data.results.map((row) => row.result),
+    });
+  } catch (error) {
+    return json({ ok: false, error: error?.message || "Backfill histori gagal." }, 502);
+  }
+}
+
 async function handleStoredHistory(url, env) {
   if (!env?.DB) {
     return json({
@@ -133,11 +158,11 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.5.2",
+        version: "0.5.3",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
         validation: "CPU-safe chronological calibration + locked newest holdout",
-        historyCollection: "20 recent pages + incremental 5-page older backfill per manual sync",
+        historyCollection: "recent sync + dedicated low-load incremental older backfill",
         endpoints: [
           "/api/models",
           "/api/analyze",
@@ -146,6 +171,7 @@ export default {
           "/api/validate",
           "/api/source?pages=5",
           "/api/collect",
+          "/api/backfill",
           "/api/history?limit=500",
         ],
         now: new Date().toISOString(),
@@ -154,7 +180,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.5.2", models: listModels() });
+      return json({ ok: true, version: "0.5.3", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
@@ -185,6 +211,11 @@ export default {
     if (url.pathname === "/api/collect") {
       if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST." }, 405);
       return handleCollect(request, env);
+    }
+
+    if (url.pathname === "/api/backfill") {
+      if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST." }, 405);
+      return handleBackfill(request, env);
     }
 
     if (url.pathname === "/api/history") {
