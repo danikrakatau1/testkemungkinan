@@ -168,10 +168,10 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.6.2",
+        version: "0.6.3",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
-        validation: "V0.5.4 single-window + V0.6.1 lightweight walk-forward + V0.6.2 client-side regime/stability diagnostics",
+        validation: "V0.5.4 single-window + optimized V0.6.3 walk-forward + V0.6.2 regime/stability diagnostics",
         multiWindowValidation: {
           defaultWindows: 8,
           targetsPerWindow: 18,
@@ -179,7 +179,8 @@ export default {
           lockedHoldoutPerWindow: 6,
           defaultAggregateHoldoutTargets: 48,
           trainingDrawsPerTarget: 80,
-          requestStrategy: "sequential browser requests to /api/validate-window with retry/backoff",
+          requestStrategy: "sequential browser requests to optimized /api/validate-window with retry/backoff",
+          optimization: "shared feature build across four models + O(1) repeat lookup",
         },
         regimeAnalysis: {
           requestCost: "none beyond multi-window run",
@@ -210,7 +211,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.6.2", models: listModels() });
+      return json({ ok: true, version: "0.6.3", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
