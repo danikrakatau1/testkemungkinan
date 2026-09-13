@@ -1,5 +1,6 @@
 import baseWorker from "./index_v091.js";
 import { ADAPTIVE_VERSION, getAdaptiveErrorState } from "./adaptive_learner.js";
+import { probeEuropeSource } from "./europe_probe.js";
 
 const VERSION = "0.9.2";
 const JSON_HEADERS = {
@@ -28,6 +29,19 @@ async function handleAdaptive(env) {
   }
 }
 
+async function handleEuropeProbe() {
+  try {
+    return json(await probeEuropeSource());
+  } catch (error) {
+    return json({
+      ok: false,
+      version: VERSION,
+      mode: "passive-public-asset-probe",
+      error: error?.message || "Europe passive probe gagal.",
+    }, 502);
+  }
+}
+
 async function upgradedHealth(request, env, ctx) {
   const response = await baseWorker.fetch(request, env, ctx);
   const data = await response.json().catch(() => ({}));
@@ -52,12 +66,18 @@ async function upgradedHealth(request, env, ctx) {
     ],
     note: "Adaptive learning can improve calibration if stable signal exists, but it does not create predictability when the source process is random."
   };
+  data.europeProbe = {
+    endpoint: "/api/europe-probe",
+    source: "https://europelotto.click/#/3d_result",
+    mode: "passive public HTML/JS asset inspection only",
+    purpose: "discover the public request used by the SPA before building a First Place-only collector"
+  };
   data.performance = {
     ...(data.performance || {}),
     visualMode: "SAFE",
     adaptiveLearner: "server-side only; no WebGL or heavy client loop",
   };
-  data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/adaptive"]));
+  data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/adaptive", "/api/europe-probe"]));
   data.now = new Date().toISOString();
   return json(data, response.status);
 }
@@ -88,6 +108,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/api/adaptive") return handleAdaptive(env);
+    if (url.pathname === "/api/europe-probe") return handleEuropeProbe();
     if (url.pathname === "/api/health") return upgradedHealth(request, env, ctx);
     const response = await baseWorker.fetch(request, env, ctx);
     return injectV092(request, response);
