@@ -1,5 +1,5 @@
 name = "testkemungkinan"
-main = "src/index_v070.js"
+main = "src/index_v080.js"
 compatibility_date = "2026-09-13"
 
 [assets]
@@ -13,4 +13,4 @@ database_name = "testkemungkinan-db"
 database_id = "1ba40fd4-f8f8-4e3b-b38a-ee528c2d62d2"
 
 [triggers]
-crons = ["7 * * * *"]
+crons = ["*/10 * * * *"]
