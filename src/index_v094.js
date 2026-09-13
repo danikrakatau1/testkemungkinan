@@ -1,5 +1,6 @@
 import baseWorker from "./index_v093.js";
 import { getAiV2ObserverStatus, runAiV2Observer } from "./ai_v2_observer.js";
+import { getAiV2History } from "./ai_v2_history.js";
 
 const VERSION = "0.9.4";
 const JSON_HEADERS = {
@@ -18,6 +19,23 @@ async function handleAiV2Status(request, env) {
     return json(await getAiV2ObserverStatus(env));
   } catch (error) {
     return json({ ok: false, version: VERSION, error: error?.message || "AI V2 status gagal." }, 500);
+  }
+}
+
+async function handleAiV2History(request, env) {
+  if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET untuk AI V2 history." }, 405);
+  if (!env?.DB) return json({ ok: false, error: "D1 binding DB diperlukan untuk AI V2 history." }, 503);
+  const url = new URL(request.url);
+  const limitRaw = url.searchParams.get("limit") || "50";
+  const sourceRaw = url.searchParams.get("source");
+  try {
+    return json(await getAiV2History(env, {
+      limit: limitRaw,
+      source: sourceRaw === "utama" || sourceRaw === "europe" ? sourceRaw : null,
+      settledOnly: true,
+    }));
+  } catch (error) {
+    return json({ ok: false, version: VERSION, error: error?.message || "AI V2 history gagal." }, 500);
   }
 }
 
@@ -43,12 +61,14 @@ async function upgradedHealth(request, env, ctx) {
     version: "0.1.0-observer",
     phase: "OBSERVER",
     statusEndpoint: "/api/ai-v2",
+    historyEndpoint: "/api/ai-v2-history",
     syncEndpoint: "/api/ai-v2-sync",
     predictionEnabled: false,
     writesToV1: false,
     forwardOnly: true,
     capturePendingLocksOnly: true,
     noHistoricalBackfillAsTraining: true,
+    lockedHistoryRegeneration: false,
     observations: aiV2?.counts ?? null,
     gate: aiV2?.gates?.currentGate ?? "COLLECT_FORWARD_EVIDENCE",
   };
@@ -56,8 +76,9 @@ async function upgradedHealth(request, env, ctx) {
     ...(data.performance || {}),
     aiV2Ui: "SAFE · CSS/DOM only · no WebGL",
     aiV2Mode: "observer only · zero prediction authority",
+    aiV2History: "actual result and original locked prediction are displayed separately",
   };
-  data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/ai-v2", "/api/ai-v2-sync"]));
+  data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/ai-v2", "/api/ai-v2-history", "/api/ai-v2-sync"]));
   data.now = new Date().toISOString();
   return json(data, response.status);
 }
@@ -85,6 +106,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/api/ai-v2") return handleAiV2Status(request, env);
+    if (url.pathname === "/api/ai-v2-history") return handleAiV2History(request, env);
     if (url.pathname === "/api/ai-v2-sync") return handleAiV2Sync(request, env);
     if (url.pathname === "/api/health") return upgradedHealth(request, env, ctx);
 
