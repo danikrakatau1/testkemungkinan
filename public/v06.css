@@ -1,0 +1,80 @@
+.btn-multi {
+  border: 1px solid rgba(96, 165, 250, .35);
+  background: linear-gradient(180deg, rgba(37, 99, 235, .18), rgba(15, 23, 42, .92));
+  color: #dbeafe;
+}
+
+.btn-multi:hover:not(:disabled) {
+  border-color: rgba(96, 165, 250, .62);
+  transform: translateY(-1px);
+}
+
+.multi-window-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.multi-window-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(96, 165, 250, .7), transparent);
+  pointer-events: none;
+}
+
+.multi-progress {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, .12);
+  margin: 10px 0 14px;
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+
+.multi-progress.show { opacity: 1; }
+
+.multi-progress > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #60a5fa, #8b5cf6);
+  transition: width .25s ease;
+}
+
+.multi-window-table th,
+.multi-window-table td {
+  white-space: nowrap;
+}
+
+.gate-running {
+  border-color: rgba(96, 165, 250, .35) !important;
+  background: rgba(30, 64, 175, .08) !important;
+}
+
+.stability-row {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, .10);
+}
+
+.stability-row:last-child { border-bottom: 0; }
+.stability-row strong { font-size: 15px; color: #f8fafc; }
+.stability-row span { color: #94a3b8; font-size: 12px; }
+.stability-row em { color: #c4b5fd; font-size: 12px; font-style: normal; }
+
+@media (max-width: 900px) {
+  .action-row-v05 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .action-row-v05 {
+    grid-template-columns: 1fr;
+  }
+}
