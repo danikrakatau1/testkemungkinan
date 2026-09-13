@@ -114,7 +114,7 @@ if (parsed.length !== 2 || parsed[0].period !== 25532 || parsed[0].result !== "5
 
 console.log(JSON.stringify({
   ok: true,
-  version: "0.6.4",
+  version: "0.6.5",
   newest: analysis.history.newest,
   top3: analysis.top3.map((row) => row.number),
   backtestTrials: backtest.summary.trials,
@@ -124,6 +124,7 @@ console.log(JSON.stringify({
   walkForwardTrainingWindow: windowValidation.meta.trainingWindowDraws,
   engineParity: parityPass ? "PASS" : "FAIL",
   parityAuditPage: "/parity.html",
+  experimentLock: "D1-backed snapshot persistence is exercised after deploy via /api/experiments",
   models: models.map((model) => model.id),
   collectorFixture: parsed.map((row) => `${row.period}:${row.result}`),
 }, null, 2));
