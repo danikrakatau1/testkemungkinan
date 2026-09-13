@@ -1,4 +1,4 @@
-import { analyzeHistory, backtestHistory } from "./analyzer.js";
+import { analyzeHistory, backtestHistory, compareModels, listModels } from "./analyzer.js";
 import { collectAndPersist, fetchRecentResults, readStoredResults } from "./collector.js";
 
 const JSON_HEADERS = {
@@ -7,10 +7,7 @@ const JSON_HEADERS = {
 };
 
 function json(data, status = 200) {
-  return new Response(JSON.stringify(data, null, 2), {
-    status,
-    headers: JSON_HEADERS,
-  });
+  return new Response(JSON.stringify(data, null, 2), { status, headers: JSON_HEADERS });
 }
 
 async function readJson(request) {
@@ -21,13 +18,19 @@ async function readJson(request) {
   }
 }
 
+function analysisOptions(body = {}) {
+  return {
+    decay: body?.decay,
+    minTrain: body?.minTrain,
+    maxTrials: body?.maxTrials,
+    modelId: body?.modelId,
+  };
+}
+
 async function handleAnalyze(request) {
   try {
     const body = await readJson(request);
-    const result = analyzeHistory(body?.history, {
-      decay: body?.decay,
-    });
-    return json({ ok: true, ...result });
+    return json({ ok: true, ...analyzeHistory(body?.history, analysisOptions(body)) });
   } catch (error) {
     return json({ ok: false, error: error?.message || "Analisis gagal." }, 400);
   }
@@ -36,14 +39,18 @@ async function handleAnalyze(request) {
 async function handleBacktest(request) {
   try {
     const body = await readJson(request);
-    const result = backtestHistory(body?.history, {
-      decay: body?.decay,
-      minTrain: body?.minTrain,
-      maxTrials: body?.maxTrials,
-    });
-    return json({ ok: true, ...result });
+    return json({ ok: true, ...backtestHistory(body?.history, analysisOptions(body)) });
   } catch (error) {
     return json({ ok: false, error: error?.message || "Backtest gagal." }, 400);
+  }
+}
+
+async function handleLeaderboard(request) {
+  try {
+    const body = await readJson(request);
+    return json({ ok: true, ...compareModels(body?.history, analysisOptions(body)) });
+  } catch (error) {
+    return json({ ok: false, error: error?.message || "Perbandingan model gagal." }, 400);
   }
 }
 
@@ -56,12 +63,7 @@ function pagesFromUrl(url, fallback = 5) {
 async function handleLiveSource(url) {
   try {
     const data = await fetchRecentResults({ pages: pagesFromUrl(url) });
-    return json({
-      ok: true,
-      mode: "live-source",
-      ...data,
-      history: data.results.map((row) => row.result),
-    });
+    return json({ ok: true, mode: "live-source", ...data, history: data.results.map((row) => row.result) });
   } catch (error) {
     return json({ ok: false, error: error?.message || "Collector source gagal." }, 502);
   }
@@ -72,12 +74,7 @@ async function handleCollect(request, env) {
     const body = await readJson(request).catch(() => ({}));
     const pages = Math.min(20, Math.max(1, Number(body?.pages) || 2));
     const data = await collectAndPersist(env, { pages });
-    return json({
-      ok: true,
-      mode: "collect-and-persist",
-      ...data,
-      history: data.results.map((row) => row.result),
-    });
+    return json({ ok: true, mode: "collect-and-persist", ...data, history: data.results.map((row) => row.result) });
   } catch (error) {
     return json({ ok: false, error: error?.message || "Collector gagal." }, 502);
   }
@@ -116,17 +113,25 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.3.0",
+        version: "0.4.0",
         storageConfigured: Boolean(env?.DB),
+        models: listModels(),
         endpoints: [
+          "/api/models",
           "/api/analyze",
           "/api/backtest",
+          "/api/leaderboard",
           "/api/source?pages=5",
           "/api/collect",
           "/api/history?limit=500",
         ],
         now: new Date().toISOString(),
       });
+    }
+
+    if (url.pathname === "/api/models") {
+      if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
+      return json({ ok: true, version: "0.4.0", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
@@ -137,6 +142,11 @@ export default {
     if (url.pathname === "/api/backtest") {
       if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST." }, 405);
       return handleBacktest(request);
+    }
+
+    if (url.pathname === "/api/leaderboard") {
+      if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST." }, 405);
+      return handleLeaderboard(request);
     }
 
     if (url.pathname === "/api/source") {
