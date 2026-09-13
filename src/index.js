@@ -89,8 +89,12 @@ async function handleCollect(request, env) {
   try {
     const body = await readJson(request).catch(() => ({}));
     const pages = Math.min(20, Math.max(1, Number(body?.pages) || 2));
-    const data = await collectAndPersist(env, { pages });
-    return json({ ok: true, mode: "collect-and-persist", ...data, history: data.results.map((row) => row.result) });
+    const requestedBackfill = Number(body?.backfillPages);
+    const backfillPages = Number.isInteger(requestedBackfill)
+      ? Math.min(20, Math.max(0, requestedBackfill))
+      : 5;
+    const data = await collectAndPersist(env, { pages, backfillPages });
+    return json({ ok: true, mode: "collect-and-persist-with-backfill", ...data, history: data.results.map((row) => row.result) });
   } catch (error) {
     return json({ ok: false, error: error?.message || "Collector gagal." }, 502);
   }
@@ -129,10 +133,11 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.5.1",
+        version: "0.5.2",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
         validation: "CPU-safe chronological calibration + locked newest holdout",
+        historyCollection: "20 recent pages + incremental 5-page older backfill per manual sync",
         endpoints: [
           "/api/models",
           "/api/analyze",
@@ -149,7 +154,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.5.1", models: listModels() });
+      return json({ ok: true, version: "0.5.2", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
@@ -196,7 +201,7 @@ export default {
 
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(
-      collectAndPersist(env, { pages: 2 }).catch((error) => {
+      collectAndPersist(env, { pages: 2, backfillPages: 0 }).catch((error) => {
         console.error("scheduled collector failed", error);
       }),
     );
