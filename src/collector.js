@@ -1,5 +1,6 @@
 const SOURCE_URL = "https://latolatolotto.com/result3d.php";
-const MAX_SOURCE_PAGES = 20;
+const MAX_BATCH_PAGES = 20;
+const MAX_SOURCE_PAGE = 5000;
 
 function clampInt(value, fallback, min, max) {
   const n = Number(value);
@@ -67,7 +68,7 @@ export function parseResultPage(html, page = 1) {
 }
 
 export async function fetchResultPage(page = 1) {
-  const safePage = clampInt(page, 1, 1, MAX_SOURCE_PAGES);
+  const safePage = clampInt(page, 1, 1, MAX_SOURCE_PAGE);
   const url = safePage > 1 ? `${SOURCE_URL}?page=${safePage}` : SOURCE_URL;
   const response = await fetch(url, {
     headers: {
@@ -78,7 +79,7 @@ export async function fetchResultPage(page = 1) {
   });
 
   if (!response.ok) {
-    throw new Error(`Source LatoLato gagal diambil (${response.status}).`);
+    throw new Error(`Source LatoLato gagal diambil (${response.status}) pada page ${safePage}.`);
   }
 
   const html = await response.text();
@@ -89,9 +90,11 @@ export async function fetchResultPage(page = 1) {
   return rows;
 }
 
-export async function fetchRecentResults(options = {}) {
-  const pages = clampInt(options.pages, 5, 1, MAX_SOURCE_PAGES);
-  const pageNumbers = Array.from({ length: pages }, (_, i) => i + 1);
+export async function fetchResultRange(options = {}) {
+  const startPage = clampInt(options.startPage, 1, 1, MAX_SOURCE_PAGE);
+  const requestedPages = clampInt(options.pages, 5, 1, MAX_BATCH_PAGES);
+  const endPage = Math.min(MAX_SOURCE_PAGE, startPage + requestedPages - 1);
+  const pageNumbers = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
   const settled = await Promise.allSettled(pageNumbers.map((page) => fetchResultPage(page)));
 
   const rows = [];
@@ -108,18 +111,25 @@ export async function fetchRecentResults(options = {}) {
 
   const results = [...byPeriod.values()].sort((a, b) => b.period - a.period);
   if (!results.length) {
-    throw new Error("Tidak ada hasil 3D yang berhasil dikumpulkan dari source.");
+    throw new Error(`Tidak ada hasil 3D yang berhasil dikumpulkan dari source page ${startPage}-${endPage}.`);
   }
 
   return {
     source: SOURCE_URL,
-    requestedPages: pages,
-    successfulPages: pages - failedPages.length,
+    startPage,
+    endPage,
+    requestedPages: pageNumbers.length,
+    successfulPages: pageNumbers.length - failedPages.length,
     failedPages,
     count: results.length,
     latest: results[0],
+    oldest: results.at(-1) || null,
     results,
   };
+}
+
+export async function fetchRecentResults(options = {}) {
+  return fetchResultRange({ startPage: 1, pages: options.pages });
 }
 
 export async function ensureSchema(db) {
@@ -199,8 +209,86 @@ export async function readStoredResults(db, limit = 500) {
   return query.results || [];
 }
 
+async function maxStoredSourcePage(db) {
+  if (!db) return 0;
+  await ensureSchema(db);
+  const query = await db.prepare(`
+    SELECT MAX(
+      CASE
+        WHEN instr(source_url, 'page=') > 0
+          THEN CAST(substr(source_url, instr(source_url, 'page=') + 5) AS INTEGER)
+        ELSE 1
+      END
+    ) AS maxPage
+    FROM results_3d
+  `).all();
+  return Number(query.results?.[0]?.maxPage || 0);
+}
+
+export async function backfillOlderResults(env, options = {}) {
+  if (!env?.DB) {
+    return {
+      configured: false,
+      inserted: 0,
+      count: 0,
+      message: "D1 binding DB diperlukan untuk incremental backfill.",
+    };
+  }
+
+  const pages = clampInt(options.pages, 5, 1, MAX_BATCH_PAGES);
+  const storedMaxPage = await maxStoredSourcePage(env.DB);
+  const startPage = clampInt(options.startPage, Math.max(1, storedMaxPage + 1), 1, MAX_SOURCE_PAGE);
+  const collected = await fetchResultRange({ startPage, pages });
+  const storage = await persistResults(env.DB, collected.results);
+
+  return {
+    ...collected,
+    storage,
+    nextStartPage: collected.endPage + 1,
+  };
+}
+
 export async function collectAndPersist(env, options = {}) {
   const collected = await fetchRecentResults(options);
-  const storage = await persistResults(env?.DB, collected.results);
-  return { ...collected, storage };
+  const recentStorage = await persistResults(env?.DB, collected.results);
+
+  const requestedBackfillPages = clampInt(options.backfillPages, 0, 0, MAX_BATCH_PAGES);
+  let backfill = null;
+  let storage = recentStorage;
+  let results = collected.results;
+
+  if (env?.DB && requestedBackfillPages > 0) {
+    try {
+      backfill = await backfillOlderResults(env, { pages: requestedBackfillPages });
+      const byPeriod = new Map();
+      [...collected.results, ...(backfill.results || [])].forEach((row) => {
+        if (!byPeriod.has(row.period)) byPeriod.set(row.period, row);
+      });
+      results = [...byPeriod.values()].sort((a, b) => b.period - a.period);
+      storage = {
+        configured: true,
+        inserted: Number(recentStorage.inserted || 0) + Number(backfill.storage?.inserted || 0),
+        recentInserted: Number(recentStorage.inserted || 0),
+        backfillInserted: Number(backfill.storage?.inserted || 0),
+      };
+    } catch (error) {
+      backfill = {
+        ok: false,
+        error: error?.message || "Backfill gagal.",
+      };
+      storage = {
+        ...recentStorage,
+        recentInserted: Number(recentStorage.inserted || 0),
+        backfillInserted: 0,
+      };
+    }
+  }
+
+  return {
+    ...collected,
+    count: results.length,
+    results,
+    storage,
+    backfill,
+  };
 }
