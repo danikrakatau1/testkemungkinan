@@ -93,6 +93,7 @@ async function injectV094(request, response) {
   let html = await response.text();
   if (!html.includes("/v094-ai-v2.css")) html = html.replace("</head>", '  <link rel="stylesheet" href="/v094-ai-v2.css">\n</head>');
   if (!html.includes("/v094-ai-v2.js")) html = html.replace("</body>", '  <script type="module" src="/v094-ai-v2.js"></script>\n</body>');
+  if (!html.includes("/v094-ai-v2-clarity.js")) html = html.replace("</body>", '  <script type="module" src="/v094-ai-v2-clarity.js"></script>\n</body>');
 
   const headers = new Headers(response.headers);
   headers.delete("content-length");
