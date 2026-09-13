@@ -4,6 +4,7 @@ const BASE_API = "https://backend.europelotto.work/api";
 const LATEST_URL = `${BASE_API}/results/latest`;
 const HISTORY_URL = `${BASE_API}/results/3d`;
 const DEFAULT_BACKFILL_LIMIT = 1200;
+const BATCH_SIZE = 80;
 
 function normalize3(value) {
   const raw = String(value ?? "").trim();
@@ -43,8 +44,7 @@ async function fetchJson(url) {
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Europe source HTTP ${response.status}`);
-    const data = await response.json();
-    return data;
+    return await response.json();
   } finally {
     clearTimeout(timer);
   }
@@ -65,30 +65,40 @@ export async function ensureEuropeSchema(db) {
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_europe_results_period ON europe_results_3d(period DESC)`).run();
 }
 
+async function tableCount(db) {
+  const query = await db.prepare("SELECT COUNT(*) AS n FROM europe_results_3d").all();
+  return Number(query.results?.[0]?.n || 0);
+}
+
 async function upsertRows(db, rows) {
-  let inserted = 0;
-  let updated = 0;
+  const unique = [...new Map((rows || []).map((row) => [row.period, row])).values()];
+  if (!unique.length) return { inserted: 0, updated: 0 };
+  const before = await tableCount(db);
   const now = new Date().toISOString();
-  for (const row of rows) {
-    const existing = await db.prepare("SELECT id, result, draw_datetime, next_draw_time FROM europe_results_3d WHERE period=? LIMIT 1")
-      .bind(row.period).all();
-    if (existing.results?.[0]) {
-      await db.prepare(`
-        UPDATE europe_results_3d
-        SET source_id=COALESCE(?, source_id), result=?, draw_datetime=COALESCE(?, draw_datetime),
-            next_draw_time=COALESCE(?, next_draw_time), collected_at=?
-        WHERE period=?
-      `).bind(row.sourceId, row.result, row.datetime, row.nextDrawTime, now, row.period).run();
-      updated += 1;
-    } else {
-      await db.prepare(`
-        INSERT INTO europe_results_3d(source_id, period, result, draw_datetime, next_draw_time, collected_at)
-        VALUES(?,?,?,?,?,?)
-      `).bind(row.sourceId, row.period, row.result, row.datetime, row.nextDrawTime, now).run();
-      inserted += 1;
-    }
+  const sql = `
+    INSERT INTO europe_results_3d(source_id, period, result, draw_datetime, next_draw_time, collected_at)
+    VALUES(?,?,?,?,?,?)
+    ON CONFLICT(period) DO UPDATE SET
+      source_id=COALESCE(excluded.source_id, europe_results_3d.source_id),
+      result=excluded.result,
+      draw_datetime=COALESCE(excluded.draw_datetime, europe_results_3d.draw_datetime),
+      next_draw_time=COALESCE(excluded.next_draw_time, europe_results_3d.next_draw_time),
+      collected_at=excluded.collected_at
+  `;
+  for (let start = 0; start < unique.length; start += BATCH_SIZE) {
+    const chunk = unique.slice(start, start + BATCH_SIZE);
+    await db.batch(chunk.map((row) => db.prepare(sql).bind(
+      row.sourceId,
+      row.period,
+      row.result,
+      row.datetime,
+      row.nextDrawTime,
+      now,
+    )));
   }
-  return { inserted, updated };
+  const after = await tableCount(db);
+  const inserted = Math.max(0, after - before);
+  return { inserted, updated: Math.max(0, unique.length - inserted) };
 }
 
 export async function fetchEuropeLatest() {
@@ -121,8 +131,7 @@ export async function readEuropeHistory(db, limit = 500) {
 
 export async function europeDrawCount(db) {
   await ensureEuropeSchema(db);
-  const query = await db.prepare("SELECT COUNT(*) AS n FROM europe_results_3d").all();
-  return Number(query.results?.[0]?.n || 0);
+  return tableCount(db);
 }
 
 export async function collectEurope(env, options = {}) {
@@ -130,7 +139,7 @@ export async function collectEurope(env, options = {}) {
   const db = env.DB;
   await ensureEuropeSchema(db);
 
-  const before = await europeDrawCount(db);
+  const before = await tableCount(db);
   const latest = await fetchEuropeLatest();
   const liveWrite = await upsertRows(db, [latest]);
 
@@ -142,7 +151,7 @@ export async function collectEurope(env, options = {}) {
     backfill = { fetched: history.length, ...write };
   }
 
-  const count = await europeDrawCount(db);
+  const count = await tableCount(db);
   const rows = await readEuropeHistory(db, 2);
   return {
     ok: true,
