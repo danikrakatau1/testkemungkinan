@@ -8,6 +8,7 @@ import { validateWeightedEnsemble } from "../src/validation.js";
 import { validateWalkForwardWindow } from "../src/validation_window.js";
 import { validateWalkForwardWindowReference } from "../src/validation_window_reference.js";
 import { parseResultPage } from "../src/collector.js";
+import { scoreForwardOutcome } from "../src/forward.js";
 
 const history = [
   "226", "572", "187", "900", "240", "571", "840",
@@ -94,6 +95,21 @@ function parityShape(result) {
 const parityPass = JSON.stringify(parityShape(windowValidation)) === JSON.stringify(parityShape(referenceValidation));
 if (!parityPass) throw new Error("Walk-forward production/reference parity drift detected.");
 
+const forwardFixture = scoreForwardOutcome({
+  top3: ["940", "920", "926"],
+  top10: ["940", "920", "926", "980", "946", "906", "970", "986", "246", "540"],
+  actual: "429",
+  actualRank: 77,
+});
+if (
+  forwardFixture.exactTop3 ||
+  forwardFixture.permutationHit ||
+  forwardFixture.bestDigitOverlap !== 2 ||
+  forwardFixture.bestPositionHits !== 1 ||
+  forwardFixture.poolDigitCoverage !== 3 ||
+  forwardFixture.actualRank !== 77
+) throw new Error("Forward scorecard fixture failed.");
+
 const collectorFixture = `
   <div>Sunday, September 13, 2026</div>
   <div>07:00 AM</div>
@@ -114,7 +130,7 @@ if (parsed.length !== 2 || parsed[0].period !== 25532 || parsed[0].result !== "5
 
 console.log(JSON.stringify({
   ok: true,
-  version: "0.6.6",
+  version: "0.6.7",
   newest: analysis.history.newest,
   top3: analysis.top3.map((row) => row.number),
   backtestTrials: backtest.summary.trials,
@@ -126,6 +142,7 @@ console.log(JSON.stringify({
   parityAuditPage: "/parity.html",
   experimentLock: "D1-backed snapshot persistence is exercised after deploy via /api/experiments",
   driftTracker: "V0.6.6 client-side comparisons over persisted experiment runs",
+  forwardScorecard: forwardFixture,
   models: models.map((model) => model.id),
   collectorFixture: parsed.map((row) => `${row.period}:${row.result}`),
 }, null, 2));
