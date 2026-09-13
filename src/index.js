@@ -93,7 +93,7 @@ async function handleLiveSource(url) {
 async function handleCollect(request, env) {
   try {
     const body = await readJson(request).catch(() => ({}));
-    const pages = Math.min(20, Math.max(1, Number(body?.pages) || 2));
+    const pages = Math.min(5, Math.max(1, Number(body?.pages) || 2));
     const requestedBackfill = Number(body?.backfillPages);
     const backfillPages = Number.isInteger(requestedBackfill)
       ? Math.min(20, Math.max(0, requestedBackfill))
@@ -162,7 +162,7 @@ export default {
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
         validation: "CPU-safe chronological calibration + locked newest holdout",
-        historyCollection: "recent sync + dedicated low-load incremental older backfill",
+        historyCollection: "5 recent pages + incremental 5-page older backfill per manual sync; dedicated /api/backfill available",
         endpoints: [
           "/api/models",
           "/api/analyze",
