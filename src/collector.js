@@ -124,7 +124,8 @@ export async function fetchRecentResults(options = {}) {
 
 export async function ensureSchema(db) {
   if (!db) return false;
-  await db.exec(`
+
+  await db.prepare(`
     CREATE TABLE IF NOT EXISTS results_3d (
       period INTEGER PRIMARY KEY,
       result TEXT NOT NULL CHECK (length(result) = 3),
@@ -132,10 +133,17 @@ export async function ensureSchema(db) {
       draw_time TEXT,
       source_url TEXT NOT NULL,
       collected_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_results_3d_period_desc ON results_3d(period DESC);
-    CREATE INDEX IF NOT EXISTS idx_results_3d_collected_at ON results_3d(collected_at);
-  `);
+    )
+  `).run();
+
+  await db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_results_3d_period_desc ON results_3d(period DESC)"
+  ).run();
+
+  await db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_results_3d_collected_at ON results_3d(collected_at)"
+  ).run();
+
   return true;
 }
 
