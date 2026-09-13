@@ -71,7 +71,7 @@ if (parsed.length !== 2 || parsed[0].period !== 25532 || parsed[0].result !== "5
 
 console.log(JSON.stringify({
   ok: true,
-  version: "0.6.1",
+  version: "0.6.2",
   newest: analysis.history.newest,
   top3: analysis.top3.map((row) => row.number),
   backtestTrials: backtest.summary.trials,
@@ -79,6 +79,7 @@ console.log(JSON.stringify({
   validationSplit: `${validation.meta.calibrationTrials}+${validation.meta.holdoutTrials}`,
   walkForwardSplit: `${windowValidation.meta.calibrationTrials}+${windowValidation.meta.holdoutTrials}`,
   walkForwardTrainingWindow: windowValidation.meta.trainingWindowDraws,
+  regimeDiagnostics: "client-side from completed multi-window results",
   models: models.map((model) => model.id),
   collectorFixture: parsed.map((row) => `${row.period}:${row.result}`),
 }, null, 2));
