@@ -9,6 +9,7 @@ import { validateWalkForwardWindow } from "../src/validation_window.js";
 import { validateWalkForwardWindowReference } from "../src/validation_window_reference.js";
 import { parseResultPage } from "../src/collector.js";
 import { scoreForwardOutcome } from "../src/forward.js";
+import { runModelArena } from "../src/arena.js";
 
 const history = [
   "226", "572", "187", "900", "240", "571", "840",
@@ -26,6 +27,7 @@ const comparison = compareModels(history, { decay: 0.9, minTrain: 8, maxTrials: 
 const validation = validateWeightedEnsemble(validationHistory, { decay: 0.9, minTrain: 8, maxTrials: 30, holdoutTrials: 10 });
 const windowValidation = validateWalkForwardWindow(validationHistory, { decay: 0.9, minTrain: 8 });
 const referenceValidation = validateWalkForwardWindowReference(validationHistory, { decay: 0.9, minTrain: 8 });
+const arena = runModelArena(validationHistory, { decay: 0.9 });
 const models = listModels();
 
 if (analysis.top3.length !== 3 || analysis.top10.length !== 10) throw new Error("Analyzer ranking length invalid.");
@@ -110,6 +112,14 @@ if (
   forwardFixture.actualRank !== 77
 ) throw new Error("Forward scorecard fixture failed.");
 
+if (
+  arena.meta?.version !== "0.7.0" ||
+  arena.models?.length !== 3 ||
+  !arena.models.every((model) => model.top3?.length === 3 && model.top10?.length === 10) ||
+  arena.digitDistributions?.length !== 3 ||
+  !arena.featureImportance?.length
+) throw new Error("Model Arena fixture failed.");
+
 const collectorFixture = `
   <div>Sunday, September 13, 2026</div>
   <div>07:00 AM</div>
@@ -130,7 +140,7 @@ if (parsed.length !== 2 || parsed[0].period !== 25532 || parsed[0].result !== "5
 
 console.log(JSON.stringify({
   ok: true,
-  version: "0.6.7",
+  version: "0.7.0",
   newest: analysis.history.newest,
   top3: analysis.top3.map((row) => row.number),
   backtestTrials: backtest.summary.trials,
@@ -143,6 +153,7 @@ console.log(JSON.stringify({
   experimentLock: "D1-backed snapshot persistence is exercised after deploy via /api/experiments",
   driftTracker: "V0.6.6 client-side comparisons over persisted experiment runs",
   forwardScorecard: forwardFixture,
+  modelArena: arena.models.map((model) => ({ id: model.id, top3: model.top3.map((row) => row.number) })),
   models: models.map((model) => model.id),
   collectorFixture: parsed.map((row) => `${row.period}:${row.result}`),
 }, null, 2));
