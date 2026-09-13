@@ -10,8 +10,11 @@ const els = {
   maxTrials: document.querySelector("#maxTrials"),
   analyzeBtn: document.querySelector("#analyzeBtn"),
   backtestBtn: document.querySelector("#backtestBtn"),
+  liveBtn: document.querySelector("#liveBtn"),
+  syncBtn: document.querySelector("#syncBtn"),
   sampleBtn: document.querySelector("#sampleBtn"),
   clearBtn: document.querySelector("#clearBtn"),
+  collectorStatus: document.querySelector("#collectorStatus"),
   error: document.querySelector("#errorBox"),
   loading: document.querySelector("#loadingLine"),
   newest: document.querySelector("#newestNumber"),
@@ -54,8 +57,9 @@ function options() {
 }
 
 function setBusy(busy) {
-  els.analyzeBtn.disabled = busy;
-  els.backtestBtn.disabled = busy;
+  [els.analyzeBtn, els.backtestBtn, els.liveBtn, els.syncBtn]
+    .filter(Boolean)
+    .forEach((button) => { button.disabled = busy; });
   els.loading.classList.toggle("show", busy);
 }
 
@@ -64,12 +68,26 @@ function showError(message = "") {
   els.error.classList.toggle("show", Boolean(message));
 }
 
+function setCollectorStatus(message, strong = "Collector") {
+  if (!els.collectorStatus) return;
+  els.collectorStatus.innerHTML = `<span>◎</span><span><strong>${strong}.</strong> ${message}</span>`;
+}
+
 async function postJson(path, payload) {
   const response = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || `Request gagal (${response.status})`);
+  }
+  return data;
+}
+
+async function getJson(path) {
+  const response = await fetch(path, { headers: { accept: "application/json" } });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.ok) {
     throw new Error(data.error || `Request gagal (${response.status})`);
@@ -118,7 +136,7 @@ function renderDigitStats(byPosition = []) {
 function renderAnalysis(data) {
   els.newest.textContent = data.history.newest || "---";
   els.drawCount.textContent = String(data.history.draws ?? 0);
-  els.modelName.textContent = "V0.2";
+  els.modelName.textContent = "V0.3";
   renderTop3(data.top3);
   renderTop10(data.top10);
   renderDigitStats(data.history.byPosition);
@@ -179,10 +197,64 @@ async function runBacktest() {
   }
 }
 
+async function loadLiveSource() {
+  showError();
+  setBusy(true);
+  setCollectorStatus("sedang mengambil hasil terbaru dari source…", "Live collector");
+  try {
+    const data = await getJson("/api/source?pages=5");
+    els.historyInput.value = data.history.join("\n");
+    const latest = data.latest;
+    const pageNote = data.failedPages?.length ? ` · ${data.failedPages.length} page gagal` : "";
+    setCollectorStatus(
+      `${data.count} draw dimuat. Latest period ${latest?.period ?? "-"} = ${latest?.result ?? "---"}${pageNote}`,
+      "Live collector sukses",
+    );
+    const analysis = await postJson("/api/analyze", { history: data.history, decay: options().decay });
+    renderAnalysis(analysis);
+  } catch (error) {
+    setCollectorStatus(error.message || "gagal mengambil source.", "Live collector gagal");
+    showError(error.message || "Live collector gagal.");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function syncCollector() {
+  showError();
+  setBusy(true);
+  setCollectorStatus("mengambil dua halaman terbaru dan mencoba menyimpan ke D1…", "Sync collector");
+  try {
+    const data = await postJson("/api/collect", { pages: 2 });
+    els.historyInput.value = data.history.join("\n");
+    if (data.storage?.configured) {
+      setCollectorStatus(
+        `${data.count} draw diperiksa; ${data.storage.inserted} period baru masuk D1. Latest ${data.latest?.period} = ${data.latest?.result}.`,
+        "Sync + D1 sukses",
+      );
+    } else {
+      setCollectorStatus(
+        `${data.count} draw berhasil diambil, tetapi D1 belum dibinding. Data live tetap dimuat ke input.`,
+        "Source sukses · D1 belum aktif",
+      );
+    }
+    const analysis = await postJson("/api/analyze", { history: data.history, decay: options().decay });
+    renderAnalysis(analysis);
+  } catch (error) {
+    setCollectorStatus(error.message || "sync gagal.", "Sync collector gagal");
+    showError(error.message || "Sync collector gagal.");
+  } finally {
+    setBusy(false);
+  }
+}
+
 els.analyzeBtn.addEventListener("click", runAnalysis);
 els.backtestBtn.addEventListener("click", runBacktest);
+els.liveBtn?.addEventListener("click", loadLiveSource);
+els.syncBtn?.addEventListener("click", syncCollector);
 els.sampleBtn.addEventListener("click", () => {
   els.historyInput.value = sampleHistory.join("\n");
+  setCollectorStatus("contoh lokal dimuat. Klik Ambil Live 30 untuk source terbaru.", "Sample");
   showError();
   runAnalysis();
 });
