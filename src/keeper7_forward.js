@@ -171,7 +171,8 @@ async function createLock(db, snapshot) {
 
   const models = await readModelEvidence(db, snapshot.latest.period);
   const engine = runKeeper7Engine(snapshot.rows, { models });
-  const validation = walkForwardKeeper7(snapshot.rows, { minTrain: 100, maxTargets: 48 });
+  // Keep rolling-origin validation intentionally CPU-safe on Workers. Each target still trains on all prior rows.
+  const validation = walkForwardKeeper7(snapshot.rows, { minTrain: 100, maxTargets: 24 });
   const fingerprint = await sha256(JSON.stringify(snapshot.rows.map((row) => [row.period, row.result, row.drawTime])));
   const lockKey = `${snapshot.latest.period}:${fingerprint}:keeper7:${KEEPER7_VERSION}`;
   const createdAt = new Date().toISOString();
