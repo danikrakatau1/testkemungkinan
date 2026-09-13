@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#060913" />
-  <meta name="description" content="Dashboard eksperimen statistik 3 digit: live collector, multi-model ranking, baseline random, locked holdout, multi-window validation, Top 10, Top 3, dan rolling backtest tanpa future leak." />
-  <title>Test Kemungkinan 3D · V0.6</title>
+  <meta name="description" content="Dashboard eksperimen statistik 3 digit: live collector, multi-model ranking, baseline random, locked holdout, multi-window validation, regime analysis, Top 10, Top 3, dan rolling backtest tanpa future leak." />
+  <title>Test Kemungkinan 3D · V0.6.2</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/v04.css" />
   <link rel="stylesheet" href="/v05.css" />
@@ -18,7 +18,7 @@
         <div class="brand-mark">3D</div>
         <div class="brand-text">Test Kemungkinan</div>
       </div>
-      <div class="status"><span class="status-dot"></span> V0.6 · Multi-Window Validation</div>
+      <div class="status"><span class="status-dot"></span> V0.6.2 · Regime + Stability</div>
     </header>
 
     <main>
@@ -26,8 +26,8 @@
         <article class="hero-copy">
           <p class="eyebrow">Statistical Ranking Lab</p>
           <h1>Analyzer 3 Digit.</h1>
-          <p class="lead">Collector menyimpan histori ke D1. Model dibandingkan pada rolling backtest, calibration + locked holdout, lalu V0.6 menjalankan beberapa validation window secara berurutan agar histori ratusan draw bisa diuji tanpa menabrak CPU Worker.</p>
-          <div class="warning"><span>◇</span><span>Skor kandidat, confidence, leaderboard, dan multi-window gate adalah <strong>ukuran evidence historis, bukan probabilitas kemenangan</strong>. Jika sumber hasil benar-benar acak, pola historis tidak menjamin hasil berikutnya.</span></div>
+          <p class="lead">Collector menyimpan histori ke D1. Model dibandingkan pada rolling backtest, calibration + locked holdout, multi-window walk-forward, lalu V0.6.2 membedah apakah performa hanya kuat di regime tertentu atau benar-benar stabil lintas waktu.</p>
+          <div class="warning"><span>◇</span><span>Skor kandidat, confidence, leaderboard, multi-window gate, dan regime analysis adalah <strong>ukuran evidence historis, bukan probabilitas kemenangan</strong>. Jika sumber hasil benar-benar acak, pola historis tidak menjamin hasil berikutnya.</span></div>
         </article>
 
         <aside class="panel quick-panel">
@@ -182,11 +182,11 @@
             <div class="panel-title-row">
               <div>
                 <h2>Multi-Window Walk-Forward</h2>
-                <p class="panel-subtitle">V0.6 menjalankan sampai 5 window berurutan. Setiap window memproses 20 calibration + 10 locked holdout tanpa overlap target, lalu hasil holdout digabung.</p>
+                <p class="panel-subtitle">V0.6.1 menjalankan sampai 8 window berurutan. Setiap window memproses 12 calibration + 6 locked holdout tanpa overlap target, lalu hasil holdout digabung.</p>
               </div>
-              <span class="small-badge">V0.6</span>
+              <span class="small-badge">V0.6.1 engine</span>
             </div>
-            <div class="backtest-empty" id="multiWindowEmpty">Klik <strong>Run Multi-Window</strong>. Dengan 300 draw, default-nya 5 window = 150 evaluated target dan 50 locked out-of-sample target.</div>
+            <div class="backtest-empty" id="multiWindowEmpty">Klik <strong>Run Multi-Window</strong>. Dengan 300 draw, default-nya 8 window = 144 evaluated target dan 48 locked out-of-sample target.</div>
             <div class="multi-progress" id="multiWindowProgress"><span></span></div>
             <div class="validation-gate" id="multiWindowGate"></div>
             <div class="validation-metrics" id="multiWindowMetrics"></div>
@@ -209,6 +209,41 @@
                 <div class="validation-card-title">Top 3 stability across snapshots</div>
                 <div id="multiWindowStability"></div>
                 <p class="validation-note">Stability berarti sering muncul pada snapshot window, bukan probabilitas hasil berikutnya.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel regime-panel">
+            <div class="panel-title-row">
+              <div>
+                <h2>Regime & Stability Analysis</h2>
+                <p class="panel-subtitle">V0.6.2 membedah apakah edge terkonsentrasi di window terbaru, seberapa liar Δ mean-rank berubah, seberapa sering Top 3 berganti identitas, dan apakah bobot model stabil.</p>
+              </div>
+              <span class="small-badge">V0.6.2</span>
+            </div>
+            <div class="backtest-empty" id="regimeEmpty">Jalankan <strong>Run Multi-Window</strong>. Regime analysis dihitung otomatis dari hasil window yang sama tanpa request tambahan.</div>
+            <div class="validation-gate" id="regimeSummary"></div>
+            <div class="validation-metrics" id="regimeMetrics"></div>
+            <div class="table-wrap model-table-wrap" style="margin-top:14px">
+              <table class="model-table regime-table">
+                <thead><tr><th>Window</th><th>Regime</th><th>Δ random</th><th>Top10 hit</th><th>Mean rank</th><th>Top 3 snapshot</th><th>Overlap prev</th></tr></thead>
+                <tbody id="regimeBody"></tbody>
+              </table>
+            </div>
+            <div class="validation-grid" style="margin-top:14px">
+              <div class="validation-card">
+                <div class="validation-card-title">Top 3 persistence</div>
+                <div id="regimePersistence"></div>
+              </div>
+              <div class="validation-card">
+                <div class="validation-card-title">Weight stability</div>
+                <div id="regimeWeights"></div>
+                <p class="validation-note">σ kecil berarti bobot model lebih konsisten antar-window.</p>
+              </div>
+              <div class="validation-card">
+                <div class="validation-card-title">Recent vs older regime</div>
+                <div id="regimeNote"></div>
+                <p class="validation-note">Dua window pertama adalah window paling baru karena histori disusun newest → oldest.</p>
               </div>
             </div>
           </section>
@@ -247,7 +282,7 @@
 
     <footer>
       <span>Standalone project · danikrakatau1/testkemungkinan</span>
-      <span>V0.6 · sequential multi-window walk-forward validation</span>
+      <span>V0.6.2 · multi-window regime & stability diagnostics</span>
     </footer>
   </div>
 
