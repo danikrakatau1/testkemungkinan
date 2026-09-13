@@ -1,4 +1,4 @@
-const V092_VERSION = "0.9.2";
+const V092_VERSION = "0.9.3";
 const nativeFetch092 = window.fetch.bind(window);
 let adaptiveTimer092 = null;
 let adaptiveObserver092 = null;
@@ -9,7 +9,7 @@ function version092() {
   window.__AUTOPILOT_UI_VERSION__ = V092_VERSION;
 
   const status = document.querySelector(".topbar .status");
-  const desiredStatus = '<span class="status-dot"></span> V0.9.2 · AutoPilot · SAFE';
+  const desiredStatus = '<span class="status-dot"></span> V0.9.3 · AutoPilot · SAFE';
   if (status && status.innerHTML !== desiredStatus) status.innerHTML = desiredStatus;
 
   const updated = document.querySelector("#autoUpdated");
