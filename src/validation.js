@@ -8,7 +8,8 @@ const BASE_MODELS = [
 ];
 
 const RANDOM_MEAN_RANK = 500.5;
-const CPU_SAFE_TRIAL_CAP = 36;
+const CPU_SAFE_TRIAL_CAP = 30;
+const CPU_SAFE_TRAINING_WINDOW = 120;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -130,12 +131,18 @@ function fusedCurrentRanking(rankings, weights) {
   }));
 }
 
+function trainingWindow(history, targetIndex) {
+  const start = targetIndex + 1;
+  const end = Math.min(history.length, start + CPU_SAFE_TRAINING_WINDOW);
+  return history.slice(start, end);
+}
+
 function calibrationSummaries(history, options, indices) {
   const stats = Object.fromEntries(BASE_MODELS.map((model) => [model.id, createStats(model)]));
 
   for (const targetIndex of indices) {
     const target = history[targetIndex];
-    const training = history.slice(targetIndex + 1);
+    const training = trainingWindow(history, targetIndex);
     const rankings = rankBaseModels(training, options);
     for (const model of BASE_MODELS) {
       const rank = rankings[model.id].find((row) => row.number === target)?.rank ?? 1000;
@@ -177,13 +184,13 @@ function evaluateHoldout(history, options, indices, weights) {
 
   for (const targetIndex of indices) {
     const target = history[targetIndex];
-    const training = history.slice(targetIndex + 1);
+    const training = trainingWindow(history, targetIndex);
     const rankings = rankBaseModels(training, options);
     const weightedRank = fusedTargetRank(target, rankings, weights);
     const bordaRank = fusedTargetRank(target, rankings, equal);
     addRankToStats(weightedStats, weightedRank);
     addRankToStats(bordaStats, bordaRank);
-    trials.push({ target, weightedRank, bordaRank });
+    trials.push({ target, weightedRank, bordaRank, trainingDraws: training.length });
   }
 
   const weighted = summarizeStats(weightedStats);
@@ -199,18 +206,23 @@ export function validateWeightedEnsemble(historyInput, options = {}) {
   const history = sanitizeHistory(historyInput);
   const minTrain = clampInteger(options.minTrain, 8, 3, 1000);
   const requestedMax = clampInteger(options.maxTrials, 60, 1, 120);
-  const sourceEligible = Math.min(Math.max(0, history.length - minTrain), requestedMax);
 
+  if (minTrain > CPU_SAFE_TRAINING_WINDOW) {
+    throw new Error(`Validation CPU-safe mendukung Min Train maksimal ${CPU_SAFE_TRAINING_WINDOW}.`);
+  }
+
+  const sourceEligible = Math.min(Math.max(0, history.length - minTrain), requestedMax);
   if (sourceEligible < 16) {
     throw new Error("Validation Gate memerlukan minimal 16 target eligible. Tambahkan histori D1 atau turunkan Min Train.");
   }
 
-  // Keep validation below Cloudflare Worker CPU ceilings. The newest targets remain
-  // locked holdout; calibration uses the immediately older targets only.
+  // V0.5.4 hardens CPU use for large D1 histories. Validation is intentionally
+  // bounded in two dimensions: number of evaluated targets and training draws per target.
+  // Every training slice still contains only draws older than its target, so no-future-leak is preserved.
   const evaluatedTrials = Math.min(sourceEligible, CPU_SAFE_TRIAL_CAP);
-  const defaultHoldout = clamp(Math.floor(evaluatedTrials * 0.28), 10, 12);
-  const requestedHoldout = clampInteger(options.holdoutTrials, defaultHoldout, 8, 14);
-  const holdoutTrials = Math.min(requestedHoldout, evaluatedTrials - 12);
+  const defaultHoldout = 10;
+  const requestedHoldout = clampInteger(options.holdoutTrials, defaultHoldout, 8, 10);
+  const holdoutTrials = Math.min(requestedHoldout, evaluatedTrials - 20);
   const calibrationTrials = evaluatedTrials - holdoutTrials;
 
   const holdoutIndices = Array.from({ length: holdoutTrials }, (_, index) => index);
@@ -219,7 +231,11 @@ export function validateWeightedEnsemble(historyInput, options = {}) {
   const calibration = calibrationSummaries(history, options, calibrationIndices);
   const weights = deriveCalibrationWeights(calibration);
   const holdout = evaluateHoldout(history, options, holdoutIndices, weights);
-  const currentBaseRankings = rankBaseModels(history, options);
+
+  // Current weighted ranking also uses a bounded recent training window. This keeps the
+  // validation endpoint stable as D1 grows from hundreds to thousands of draws.
+  const currentHistory = history.slice(0, CPU_SAFE_TRAINING_WINDOW);
+  const currentBaseRankings = rankBaseModels(currentHistory, options);
   const currentWeightedRanking = fusedCurrentRanking(currentBaseRankings, weights);
 
   const weightedEvidence = holdout.weighted.evidence;
@@ -243,19 +259,21 @@ export function validateWeightedEnsemble(historyInput, options = {}) {
 
   return {
     meta: {
-      version: "0.5.1",
-      method: "cpu-safe-chronological-calibration-plus-locked-newest-holdout",
+      version: "0.5.4",
+      method: "bounded-cpu-chronological-calibration-plus-locked-newest-holdout",
       historyOrder: "newest-to-oldest",
       minTrain,
       maxTrials: requestedMax,
+      sourceDraws: history.length,
       sourceEligibleTrials: sourceEligible,
       eligibleTrials: evaluatedTrials,
       calibrationTrials,
       holdoutTrials,
       cpuSafeTrialCap: CPU_SAFE_TRIAL_CAP,
+      trainingWindowDraws: CPU_SAFE_TRAINING_WINDOW,
       randomBaselinesPct: { top3: 0.3, top10: 1, top25: 2.5 },
       randomMeanRank: RANDOM_MEAN_RANK,
-      note: "Bobot ditentukan hanya dari calibration targets yang lebih lama. Holdout target terbaru tidak dipakai untuk tuning. Trial validation dibatasi agar aman pada CPU Cloudflare Worker.",
+      note: "Validation memakai maksimum 30 target dan 120 draw latihan per target agar stabil pada Cloudflare Worker. Setiap training window hanya memakai draw yang lebih lama dari target; holdout terbaru tetap tidak dipakai saat tuning.",
     },
     gate: {
       passed,
@@ -280,6 +298,7 @@ export function validateWeightedEnsemble(historyInput, options = {}) {
     holdout,
     currentWeighted: {
       experimental: !passed,
+      trainingDraws: currentHistory.length,
       top3: currentWeightedRanking.slice(0, 3),
       top10: currentWeightedRanking.slice(0, 10),
     },
