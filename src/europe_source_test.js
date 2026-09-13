@@ -1,4 +1,10 @@
-const EUROPE_API = "https://backend.europelotto.work/api/results/3d";
+const EUROPE_BASE = "https://backend.europelotto.work/api";
+const PUBLIC_ROUTES = [
+  "/results/3d",
+  "/results/3d/",
+  "/results/latest",
+  "/results/latest/",
+];
 const MAX_BODY = 180000;
 
 function clip(value, max = 12000) {
@@ -24,63 +30,47 @@ function summarize(value, depth = 0) {
   return value;
 }
 
-function scanFirstPlace(value, path = "$", out = [], depth = 0) {
-  if (depth > 7 || out.length >= 40 || value == null) return out;
-  if (Array.isArray(value)) {
-    for (let i = 0; i < Math.min(value.length, 80) && out.length < 40; i += 1) {
-      scanFirstPlace(value[i], `${path}[${i}]`, out, depth + 1);
-    }
-    return out;
-  }
-  if (typeof value !== "object") return out;
-
-  for (const [key, child] of Object.entries(value)) {
-    const keyText = String(key).toLowerCase();
-    const childText = typeof child === "string" || typeof child === "number" ? String(child) : "";
-    if (
-      /first.?place|first_prize|firstprize|prize1|place1|rank1|rank_1|no1|no_1|winner|result1|result_1/.test(keyText) ||
-      /first place/i.test(childText)
-    ) {
-      out.push({ path: `${path}.${key}`, key, value: child });
-      if (out.length >= 40) break;
-    }
-    scanFirstPlace(child, `${path}.${key}`, out, depth + 1);
-    if (out.length >= 40) break;
-  }
-  return out;
+function normalizeRows(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return [];
+  if (Array.isArray(value.data)) return value.data;
+  if (Array.isArray(value.results)) return value.results;
+  if (value.data && typeof value.data === "object") return Object.values(value.data);
+  if (value.results && typeof value.results === "object") return Object.values(value.results);
+  return Object.values(value).filter((row) => row && typeof row === "object");
 }
 
-function findThreeDigitValues(value, path = "$", out = [], depth = 0) {
-  if (depth > 6 || out.length >= 60 || value == null) return out;
-  if (Array.isArray(value)) {
-    for (let i = 0; i < Math.min(value.length, 60) && out.length < 60; i += 1) {
-      findThreeDigitValues(value[i], `${path}[${i}]`, out, depth + 1);
+function extractExplicitFirstPlace(value) {
+  const rows = normalizeRows(value);
+  const found = [];
+  for (const row of rows.slice(0, 80)) {
+    if (!row || typeof row !== "object") continue;
+    const raw = row.result;
+    if (/^\d{3}$/.test(String(raw ?? "").trim())) {
+      found.push({
+        result: String(raw).trim(),
+        period: row.period ?? null,
+        datetime: row.datetime ?? null,
+        id: row.id ?? null,
+      });
     }
-    return out;
   }
-  if (typeof value !== "object") return out;
-  for (const [key, child] of Object.entries(value)) {
-    if ((typeof child === "string" || typeof child === "number") && /^\d{3}$/.test(String(child).trim())) {
-      out.push({ path: `${path}.${key}`, key, value: String(child).trim() });
-    }
-    findThreeDigitValues(child, `${path}.${key}`, out, depth + 1);
-    if (out.length >= 60) break;
-  }
-  return out;
+  return found;
 }
 
-export async function testEurope3DSource() {
+async function requestRoute(route) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), 9000);
   const started = Date.now();
+  const url = `${EUROPE_BASE}${route}`;
   try {
-    const response = await fetch(EUROPE_API, {
+    const response = await fetch(url, {
       method: "GET",
       headers: {
         accept: "application/json,text/plain,*/*",
         referer: "https://europelotto.click/",
         origin: "https://europelotto.click",
-        "user-agent": "Mozilla/5.0 EuropeResultVerifier/1.0",
+        "user-agent": "Mozilla/5.0 EuropeResultVerifier/1.1",
       },
       redirect: "follow",
       signal: controller.signal,
@@ -88,14 +78,11 @@ export async function testEurope3DSource() {
     const raw = (await response.text()).slice(0, MAX_BODY);
     let parsed = null;
     try { parsed = JSON.parse(raw); } catch {}
+    const explicitFirstPlace = parsed != null ? extractExplicitFirstPlace(parsed) : [];
 
     return {
       ok: response.ok,
-      mode: "read-only-public-endpoint-verification",
-      request: {
-        method: "GET",
-        url: EUROPE_API,
-      },
+      request: { method: "GET", url },
       response: {
         status: response.status,
         finalUrl: response.url,
@@ -104,17 +91,48 @@ export async function testEurope3DSource() {
       },
       json: parsed != null,
       shape: parsed != null ? summarize(parsed) : null,
-      firstPlaceCandidates: parsed != null ? scanFirstPlace(parsed) : [],
-      threeDigitCandidates: parsed != null ? findThreeDigitValues(parsed).slice(0, 30) : [],
-      preview: parsed != null ? clip(parsed) : clip(raw),
-      notes: [
-        "Read-only GET to the public endpoint discovered in the site's public SPA bundle.",
-        "Nothing is saved to D1 and no prediction/collector state is changed.",
-        "We still verify the response shape before building the First Place-only collector."
-      ],
+      explicitFirstPlace: explicitFirstPlace.slice(0, 12),
+      preview: parsed != null ? clip(parsed, 5000) : clip(raw, 5000),
+      elapsedMs: Date.now() - started,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      request: { method: "GET", url },
+      error: error?.message || String(error),
       elapsedMs: Date.now() - started,
     };
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function testEurope3DSource() {
+  const started = Date.now();
+  const attempts = [];
+  for (const route of PUBLIC_ROUTES) attempts.push(await requestRoute(route));
+
+  const successful = attempts.find((row) => row.ok && row.explicitFirstPlace?.length);
+  return {
+    ok: Boolean(successful),
+    mode: "read-only-public-endpoint-verification",
+    confirmedFromBundle: {
+      baseURL: EUROPE_BASE,
+      method: "GET",
+      historyRoute: "/results/3d",
+      latestRoute: "/results/latest",
+      firstPlaceField: "result",
+      secondPlaceFieldIgnored: "result2",
+      thirdPlaceFieldIgnored: "result3",
+    },
+    selected: successful || null,
+    attempts,
+    notes: [
+      "All tested routes come directly from the site's public SPA bundle; no private paths are guessed.",
+      "First Place is explicitly the `result` field in the published frontend code.",
+      "Second Place (`result2`) and Third Place (`result3`) are intentionally ignored.",
+      "Nothing is persisted to D1 and no predictor/forward lock is changed by this verifier."
+    ],
+    elapsedMs: Date.now() - started,
+  };
 }
