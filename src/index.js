@@ -158,10 +158,18 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.5.4",
+        version: "0.6.0",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
-        validation: "bounded CPU: 30 targets + 120-draw training windows + locked newest holdout",
+        validation: "V0.5.4 CPU-safe single-window engine + V0.6 sequential 5-window walk-forward orchestration",
+        multiWindowValidation: {
+          defaultWindows: 5,
+          targetsPerWindow: 30,
+          calibrationPerWindow: 20,
+          lockedHoldoutPerWindow: 10,
+          defaultAggregateHoldoutTargets: 50,
+          requestStrategy: "sequential browser requests to /api/validate",
+        },
         historyCollection: "5 recent pages + incremental 5-page older backfill per manual sync; dedicated /api/backfill available",
         endpoints: [
           "/api/models",
@@ -180,7 +188,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.5.4", models: listModels() });
+      return json({ ok: true, version: "0.6.0", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
