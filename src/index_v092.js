@@ -1,6 +1,7 @@
 import baseWorker from "./index_v091.js";
 import { ADAPTIVE_VERSION, getAdaptiveErrorState } from "./adaptive_learner.js";
 import { probeEuropeSource } from "./europe_probe.js";
+import { deepProbeEuropeSource } from "./europe_deep_probe.js";
 import { testEurope3DSource } from "./europe_source_test.js";
 
 const VERSION = "0.9.2";
@@ -39,6 +40,19 @@ async function handleEuropeProbe() {
       version: VERSION,
       mode: "passive-public-asset-probe",
       error: error?.message || "Europe passive probe gagal.",
+    }, 502);
+  }
+}
+
+async function handleEuropeDeepProbe() {
+  try {
+    return json(await deepProbeEuropeSource());
+  } catch (error) {
+    return json({
+      ok: false,
+      version: VERSION,
+      mode: "passive-public-bundle-context-probe",
+      error: error?.message || "Europe deep probe gagal.",
     }, 502);
   }
 }
@@ -83,6 +97,7 @@ async function upgradedHealth(request, env, ctx) {
   };
   data.europeProbe = {
     endpoint: "/api/europe-probe",
+    deepEndpoint: "/api/europe-probe-deep",
     source: "https://europelotto.click/#/3d_result",
     mode: "passive public HTML/JS asset inspection only",
     purpose: "discover the public request used by the SPA before building a First Place-only collector"
@@ -98,7 +113,13 @@ async function upgradedHealth(request, env, ctx) {
     visualMode: "SAFE",
     adaptiveLearner: "server-side only; no WebGL or heavy client loop",
   };
-  data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/adaptive", "/api/europe-probe", "/api/europe-source-test"]));
+  data.endpoints = Array.from(new Set([
+    ...(data.endpoints || []),
+    "/api/adaptive",
+    "/api/europe-probe",
+    "/api/europe-probe-deep",
+    "/api/europe-source-test",
+  ]));
   data.now = new Date().toISOString();
   return json(data, response.status);
 }
@@ -130,6 +151,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/api/adaptive") return handleAdaptive(env);
     if (url.pathname === "/api/europe-probe") return handleEuropeProbe();
+    if (url.pathname === "/api/europe-probe-deep") return handleEuropeDeepProbe();
     if (url.pathname === "/api/europe-source-test") return handleEuropeSourceTest();
     if (url.pathname === "/api/health") return upgradedHealth(request, env, ctx);
     const response = await baseWorker.fetch(request, env, ctx);
