@@ -2,7 +2,7 @@
 
 Project standalone untuk eksperimen analisis statistik angka 3 digit.
 
-> Fokus project: mengolah histori hasil, memberi skor kandidat 000–999, menghasilkan Top 10 / Top 3, membandingkan beberapa model, dan melakukan rolling backtest tanpa future leak. Ranking statistik tidak menjamin hasil berikutnya jika sumber angka bersifat acak.
+> Fokus project: mengolah histori hasil, memberi skor kandidat 000–999, membandingkan beberapa model, melakukan rolling backtest tanpa future leak, lalu menguji apakah performa historis juga melewati baseline random dan holdout yang dikunci. Semua skor tetap bukan jaminan hasil berikutnya.
 
 ## Arsitektur
 
@@ -20,32 +20,53 @@ Multi-Model Analyzer
     ├─ Pair Focus
     └─ Ensemble Borda
     ↓
-Rolling Backtest / Model Leaderboard
+Rolling Backtest + Random Baseline Evidence
+    ↓
+Calibration Window → Locked Newest Holdout
+    ↓
+Validation Gate
+    ├─ FAIL → Weighted Ensemble tetap eksperimen
+    └─ PASS → Weighted Ensemble boleh di-unlock
     ↓
 Top 10 → Top 3
-    ↓
-Cloudflare Web Dashboard
 ```
 
-## V0.4
+## V0.5 — Validation Hardened
 
-V0.4 menambahkan Model Lab di atas fondasi collector + D1 V0.3:
+V0.5 menambahkan lapisan validasi di atas V0.4:
 
-- lima pilihan model: `balanced`, `position`, `transition`, `pair`, dan `ensemble`
-- Ensemble Borda menggabungkan percentile rank dari empat model dasar
-- consensus metadata untuk kandidat Ensemble (`Top 3` / `Top 10` votes)
-- API daftar model
-- API multi-model leaderboard
-- rolling backtest per model tanpa future leak
-- perbandingan semua model pada target historis yang sama
-- leaderboard metric: Top 3 hit-rate, Top 10 hit-rate, Top 25 hit-rate, mean target rank, dan composite leader score
-- tombol **Compare Models** pada dashboard
-- model selector untuk langsung mengganti model aktif
-- tombol **Muat D1** untuk memakai histori permanen
-- **Sync Collector** sekarang mencoba sampai 10 halaman source lalu memuat keseluruhan histori D1 kembali ke analyzer
-- smoke test untuk analyzer, ensemble, leaderboard, backtest, dan collector parser
+- random reference Top 3 = `0.3%`, Top 10 = `1%`, Top 25 = `2.5%`
+- random theoretical mean rank = `500.5`
+- exact binomial tail untuk mengecek hit-rate vs random
+- one-sided normal approximation untuk mean-rank evidence
+- `meanRankDelta`: positif berarti mean rank historis lebih baik daripada random reference
+- baseline verdict per model (`below-random-rank`, `promising`, `validated-edge`, dll.)
+- confidence evidence konservatif; **bukan win probability**
+- chronological calibration window menggunakan target yang lebih lama
+- newest holdout dikunci dan tidak ikut menentukan bobot
+- calibration-derived weights untuk empat model dasar
+- weighted ensemble diuji pada holdout yang sama sekali tidak dipakai saat tuning
+- weighted ensemble tetap **LOCKED** sampai gate konservatif lolos
+- dashboard Validation Gate + weight breakdown + holdout comparison
+- Model Lab sekarang menampilkan delta vs random dan baseline status
+- rolling backtest sekarang menampilkan hit count, random mean-rank reference, p-value, dan evidence status
+- Sync Collector mencoba hingga 20 halaman source per sync
 
 Urutan histori selalu **terbaru → terlama**.
+
+## Validation Gate
+
+Default split menggunakan sekitar 25% target eligible terbaru sebagai holdout, minimum 8 dan maksimum 20. Sisanya dipakai sebagai calibration target.
+
+Gate weighted ensemble saat ini mensyaratkan:
+
+- minimal 20 calibration trials
+- minimal 10 locked holdout trials
+- holdout mean rank lebih baik daripada `500.5`
+- `p(Top10) <= 0.10`
+- `p(mean rank) <= 0.20`
+
+Jika syarat belum terpenuhi, dashboard tetap boleh menampilkan **experimental weighted Top 3**, tetapi ranking tersebut tidak menggantikan Top 3 utama.
 
 ## Model
 
@@ -55,15 +76,15 @@ Urutan histori selalu **terbaru → terlama**.
 | `position` | menekankan frekuensi digit per posisi |
 | `transition` | menekankan transisi digit antar-draw |
 | `pair` | menekankan pasangan digit bersebelahan |
-| `ensemble` | rata-rata percentile rank keempat model dasar |
+| `ensemble` | equal-weight Borda dari empat model dasar |
 
-Bobot model adalah hipotesis eksploratif. Model Lab dipakai untuk melihat apakah satu pendekatan menunjukkan perilaku historis yang lebih baik daripada model lain pada data yang sama.
+Calibration weights V0.5 tidak mengubah model dasar. Bobot hanya dipakai untuk eksperimen weighted ensemble yang kemudian harus melewati locked holdout.
 
 ## API
 
 ### `GET /api/health`
 
-Status Worker, versi, D1 binding, daftar model, dan endpoint aktif.
+Status Worker, versi, D1 binding, daftar model, mode validation, dan endpoint aktif.
 
 ### `GET /api/models`
 
@@ -71,13 +92,13 @@ Mengembalikan daftar model yang tersedia.
 
 ### `GET /api/source?pages=5`
 
-Mengambil histori langsung dari source tanpa membutuhkan database.
+Mengambil histori langsung dari source tanpa database.
 
 ### `POST /api/collect`
 
 ```json
 {
-  "pages": 10
+  "pages": 20
 }
 ```
 
@@ -97,40 +118,37 @@ Membaca histori permanen dari D1, terbaru → terlama.
 }
 ```
 
-Response berisi statistik histori, Top 10, Top 3, dan metadata model aktif.
-
 ### `POST /api/backtest`
 
-```json
-{
-  "history": ["226", "572", "187", "900", "240", "571", "840", "828", "983", "236", "620", "161", "717"],
-  "decay": 0.9,
-  "modelId": "balanced",
-  "minTrain": 8,
-  "maxTrials": 60
-}
-```
-
-Setiap target hanya memakai draw yang lebih lama dari target tersebut sebagai data latihan.
+Response V0.5 selain summary juga mempunyai `evidence` berisi mean-rank delta, expected random hits, p-values, confidence evidence, dan baseline verdict.
 
 ### `POST /api/leaderboard`
 
+Setiap row leaderboard sekarang mempunyai `evidence` sendiri. Model #1 tetap berarti terbaik **di antara model yang diuji**, bukan otomatis lebih baik daripada random.
+
+### `POST /api/validate`
+
 ```json
 {
-  "history": ["226", "572", "187", "900", "240", "571", "840", "828", "983", "236", "620", "161", "717"],
+  "history": ["226", "572", "187", "900"],
   "decay": 0.9,
   "minTrain": 8,
   "maxTrials": 60
 }
 ```
 
-Semua model diuji pada trial yang sama. Response berisi model pemenang historis, leaderboard, current Top 3 tiap model, serta metrik perbandingan.
+Pada data nyata gunakan histori D1 yang cukup panjang. Response berisi:
+
+- `gate`
+- `weights`
+- `calibration`
+- `holdout.weighted`
+- `holdout.borda`
+- `currentWeighted.top3/top10`
 
 ## D1 storage
 
-Worker menggunakan binding D1 bernama tepat `DB` dan database yang saat ini dipakai adalah `testkemungkinan-db`.
-
-Schema `results_3d` dibuat otomatis saat sync pertama. File SQL juga tersedia di `migrations/0001_results_3d.sql`.
+Worker menggunakan binding D1 bernama tepat `DB` dan database `testkemungkinan-db`. Binding sudah dikunci melalui `wrangler.toml`, sehingga deploy GitHub berikutnya tidak seharusnya menghapus koneksi D1.
 
 ## Lokal
 
@@ -142,13 +160,14 @@ npm run dev
 
 ## Catatan interpretasi
 
-`score`, `leaderScore`, dan posisi leaderboard adalah **skor relatif/historis, bukan probabilitas hasil berikutnya**. Backtest yang baik pun tidak membuktikan bahwa proses sumber dapat diprediksi jika draw memang acak.
+`score`, `leaderScore`, `confidenceScore`, p-value, model weights, dan ranking semuanya adalah alat evaluasi statistik historis. Tidak ada metrik tersebut yang berarti probabilitas bahwa suatu nomor akan keluar pada draw berikutnya.
 
 ## Roadmap
 
 1. V0.1 — Worker + baseline analyzer
 2. V0.2 — interactive analyzer + Top 10 / Top 3 + rolling backtest
 3. V0.3 — live collector + D1 storage + dedup period + hourly schedule
-4. **V0.4 — multi-model analyzer + Ensemble Borda + model leaderboard**
-5. V0.5 — larger-history evaluation, calibration, stability windows, monitoring
-6. V1.0 — production dashboard + hardened scheduled collection
+4. V0.4 — multi-model analyzer + Ensemble Borda + model leaderboard
+5. **V0.5 — random baseline evidence + calibration + locked holdout + weighted validation gate**
+6. V0.6 — deeper history import + stability windows + drift monitoring
+7. V1.0 — production dashboard + hardened scheduled collection
