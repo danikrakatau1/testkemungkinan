@@ -1,7 +1,6 @@
 const V090_VERSION = "0.9.0";
 const nativeFetch = window.fetch.bind(window);
 let v090Timer = null;
-let versionObserver = null;
 
 function esc(value) {
   return String(value ?? "")
@@ -26,8 +25,8 @@ function injectStyles() {
     .v090-body{display:grid;grid-template-columns:230px 1fr;gap:12px;padding:14px 16px 16px}
     .v090-top{border:1px solid rgba(148,163,184,.11);border-radius:13px;padding:12px;background:rgba(10,18,33,.48)}
     .v090-label{font-size:9px;color:#6f7d96;text-transform:uppercase;letter-spacing:.08em}.v090-numbers{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:9px}
-    .v090-number{position:relative;padding:10px 4px 9px;text-align:center;border:1px solid rgba(129,140,248,.16);border-radius:9px;background:rgba(17,27,49,.72);font-family:"SFMono-Regular",Consolas,monospace;font-size:19px;font-weight:850;color:#eef2ff;transition:transform .22s cubic-bezier(.22,1,.36,1),border-color .22s ease,box-shadow .22s ease}
-    .v090-number small{display:block;font-size:7px;color:#64748b;margin-bottom:4px}.v090-number:hover{transform:translateY(-2px);border-color:rgba(129,140,248,.34);box-shadow:0 10px 22px rgba(0,0,0,.15)}
+    .v090-number{position:relative;padding:10px 4px 9px;text-align:center;border:1px solid rgba(129,140,248,.16);border-radius:9px;background:rgba(17,27,49,.72);font-family:"SFMono-Regular",Consolas,monospace;font-size:19px;font-weight:850;color:#eef2ff}
+    .v090-number small{display:block;font-size:7px;color:#64748b;margin-bottom:4px}
     .v090-lock{margin-top:9px;font-size:9px;color:#71819b;line-height:1.5}.v090-lock strong{color:#a5b4fc}
     .v090-regimes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
     .v090-regime{border:1px solid rgba(148,163,184,.10);border-radius:12px;padding:10px;background:rgba(8,15,29,.42)}
@@ -70,26 +69,18 @@ function injectPanel() {
 }
 
 function markVersion() {
+  const uiVersion = String(window.__AUTOPILOT_UI_VERSION__ || V090_VERSION);
   const status = document.querySelector(".topbar .status");
-  const desiredStatus = '<span class="status-dot"></span> V0.9.0 · AutoPilot';
-  if (status && status.innerHTML !== desiredStatus) status.innerHTML = desiredStatus;
+  if (status) status.innerHTML = `<span class="status-dot"></span> V${uiVersion} · AutoPilot${uiVersion !== V090_VERSION ? " · SAFE" : ""}`;
   const updated = document.querySelector("#autoUpdated");
   if (updated) {
     const current = String(updated.textContent || "");
     const next = current.match(/V\d+\.\d+\.\d+/)
-      ? current.replace(/V\d+\.\d+\.\d+/g, `V${V090_VERSION}`)
-      : `${current} · V${V090_VERSION}`;
+      ? current.replace(/V\d+\.\d+\.\d+/g, `V${uiVersion}`)
+      : `${current} · V${uiVersion}`;
     if (current !== next) updated.textContent = next;
   }
-  document.title = `AutoPilot 3D · V${V090_VERSION}`;
-}
-
-function installVersionGuard() {
-  if (versionObserver) return;
-  const root = document.body;
-  if (!root) return;
-  versionObserver = new MutationObserver(() => markVersion());
-  versionObserver.observe(root, { childList: true, subtree: true, characterData: true });
+  document.title = `AutoPilot 3D · V${uiVersion}`;
 }
 
 function renderNumbers(pending) {
@@ -181,7 +172,6 @@ function init() {
     return;
   }
   markVersion();
-  installVersionGuard();
   attachRefreshHook();
   loadTwoStage();
   clearInterval(v090Timer);
@@ -190,7 +180,6 @@ function init() {
     attachRefreshHook();
     if (!document.hidden) loadTwoStage();
   }, 30_000);
-  setInterval(markVersion, 2000);
 }
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once: true });
