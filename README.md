@@ -2,7 +2,7 @@
 
 Project standalone untuk eksperimen analisis statistik angka 3 digit.
 
-> Fokus project: mengolah riwayat hasil, memberi skor kandidat 000–999, menghasilkan Top 10 / Top 3, dan melakukan backtest. Ranking statistik tidak menjamin hasil berikutnya jika sumber angka bersifat acak.
+> Fokus project: mengolah histori hasil, memberi skor kandidat 000–999, menghasilkan Top 10 / Top 3, membandingkan beberapa model, dan melakukan rolling backtest tanpa future leak. Ranking statistik tidak menjamin hasil berikutnya jika sumber angka bersifat acak.
 
 ## Arsitektur
 
@@ -11,97 +11,126 @@ LatoLato 3D Result Source
     ↓
 Live Collector
     ↓
-D1 History Store (optional binding DB)
+Cloudflare D1 History Store
     ↓
-Analyzer / Scoring Engine
+Multi-Model Analyzer
+    ├─ Balanced
+    ├─ Position Focus
+    ├─ Transition Focus
+    ├─ Pair Focus
+    └─ Ensemble Borda
     ↓
-Rolling Backtest
+Rolling Backtest / Model Leaderboard
     ↓
 Top 10 → Top 3
     ↓
 Cloudflare Web Dashboard
 ```
 
-## V0.3
+## V0.4
 
-V0.3 sudah berisi:
+V0.4 menambahkan Model Lab di atas fondasi collector + D1 V0.3:
 
-- Cloudflare Worker + static assets
-- live collector untuk `https://latolatolotto.com/result3d.php`
-- pagination collector (maksimum 20 halaman per request)
-- parser period + tiga digit dari asset `ball_N.webp`
-- dedup berdasarkan `period`
-- API live source tanpa database
-- optional D1 persistence melalui binding bernama `DB`
-- auto-create schema D1 saat sync pertama
-- scheduled collector setiap jam pada menit ke-07 UTC
-- dashboard tombol `Ambil Live 30` dan `Sync Collector`
-- analyzer seluruh kandidat `000–999`
-- ranking Top 10 / Top 3
-- rolling backtest tanpa future leak
-- smoke test termasuk fixture parser collector
+- lima pilihan model: `balanced`, `position`, `transition`, `pair`, dan `ensemble`
+- Ensemble Borda menggabungkan percentile rank dari empat model dasar
+- consensus metadata untuk kandidat Ensemble (`Top 3` / `Top 10` votes)
+- API daftar model
+- API multi-model leaderboard
+- rolling backtest per model tanpa future leak
+- perbandingan semua model pada target historis yang sama
+- leaderboard metric: Top 3 hit-rate, Top 10 hit-rate, Top 25 hit-rate, mean target rank, dan composite leader score
+- tombol **Compare Models** pada dashboard
+- model selector untuk langsung mengganti model aktif
+- tombol **Muat D1** untuk memakai histori permanen
+- **Sync Collector** sekarang mencoba sampai 10 halaman source lalu memuat keseluruhan histori D1 kembali ke analyzer
+- smoke test untuk analyzer, ensemble, leaderboard, backtest, dan collector parser
 
 Urutan histori selalu **terbaru → terlama**.
+
+## Model
+
+| ID | Fokus |
+| --- | --- |
+| `balanced` | kombinasi posisi, transisi, pair, dan frekuensi global |
+| `position` | menekankan frekuensi digit per posisi |
+| `transition` | menekankan transisi digit antar-draw |
+| `pair` | menekankan pasangan digit bersebelahan |
+| `ensemble` | rata-rata percentile rank keempat model dasar |
+
+Bobot model adalah hipotesis eksploratif. Model Lab dipakai untuk melihat apakah satu pendekatan menunjukkan perilaku historis yang lebih baik daripada model lain pada data yang sama.
 
 ## API
 
 ### `GET /api/health`
 
-Status Worker, versi, endpoint aktif, dan apakah D1 binding `DB` sudah tersedia.
+Status Worker, versi, D1 binding, daftar model, dan endpoint aktif.
+
+### `GET /api/models`
+
+Mengembalikan daftar model yang tersedia.
 
 ### `GET /api/source?pages=5`
 
-Mengambil histori langsung dari source. Tidak membutuhkan database.
-
-Response menyertakan `results` lengkap dan `history` berupa array angka terbaru → terlama.
+Mengambil histori langsung dari source tanpa membutuhkan database.
 
 ### `POST /api/collect`
 
 ```json
 {
-  "pages": 2
+  "pages": 10
 }
 ```
 
-Mengambil source dan mencoba menyimpannya ke D1. Jika binding `DB` belum ada, source tetap berhasil diambil tetapi `storage.configured` bernilai `false`.
+Mengambil source dan menyimpan period baru ke D1 melalui binding `DB`. Dedup memakai `period` sebagai primary key.
 
 ### `GET /api/history?limit=500`
 
-Membaca histori yang sudah tersimpan di D1. Endpoint ini membutuhkan binding `DB`.
+Membaca histori permanen dari D1, terbaru → terlama.
 
 ### `POST /api/analyze`
 
 ```json
 {
-  "history": ["572", "187", "900", "240", "571", "840", "828", "983", "236", "620"],
-  "decay": 0.9
+  "history": ["226", "572", "187", "900", "240", "571", "840", "828", "983"],
+  "decay": 0.9,
+  "modelId": "ensemble"
 }
 ```
+
+Response berisi statistik histori, Top 10, Top 3, dan metadata model aktif.
 
 ### `POST /api/backtest`
 
 ```json
 {
-  "history": ["572", "187", "900", "240", "571", "840", "828", "983", "236", "620", "161", "717"],
+  "history": ["226", "572", "187", "900", "240", "571", "840", "828", "983", "236", "620", "161", "717"],
+  "decay": 0.9,
+  "modelId": "balanced",
+  "minTrain": 8,
+  "maxTrials": 60
+}
+```
+
+Setiap target hanya memakai draw yang lebih lama dari target tersebut sebagai data latihan.
+
+### `POST /api/leaderboard`
+
+```json
+{
+  "history": ["226", "572", "187", "900", "240", "571", "840", "828", "983", "236", "620", "161", "717"],
   "decay": 0.9,
   "minTrain": 8,
   "maxTrials": 60
 }
 ```
 
-Untuk setiap target historis, engine hanya memakai draw yang lebih lama dari target tersebut sebagai data latihan.
+Semua model diuji pada trial yang sama. Response berisi model pemenang historis, leaderboard, current Top 3 tiap model, serta metrik perbandingan.
 
-## Mengaktifkan D1 storage
+## D1 storage
 
-Worker tetap deployable tanpa D1. Untuk persistence otomatis:
+Worker menggunakan binding D1 bernama tepat `DB` dan database yang saat ini dipakai adalah `testkemungkinan-db`.
 
-1. Buat Cloudflare D1 database, rekomendasi nama `testkemungkinan-db`.
-2. Pada Worker `testkemungkinan`, buka tab **Bindings**.
-3. Tambahkan **D1 database** dengan variable name tepat `DB`.
-4. Pilih database yang baru dibuat dan simpan binding.
-5. Klik `Sync Collector` di dashboard atau tunggu scheduled collector berikutnya.
-
-Schema `results_3d` akan dibuat otomatis pada sync pertama. File SQL yang sama juga tersedia di `migrations/0001_results_3d.sql`.
+Schema `results_3d` dibuat otomatis saat sync pertama. File SQL juga tersedia di `migrations/0001_results_3d.sql`.
 
 ## Lokal
 
@@ -113,13 +142,13 @@ npm run dev
 
 ## Catatan interpretasi
 
-`score` adalah skor relatif untuk mengurutkan 1.000 kandidat, **bukan probabilitas bahwa kandidat akan keluar**. Backtest historis juga bukan jaminan performa hasil berikutnya.
+`score`, `leaderScore`, dan posisi leaderboard adalah **skor relatif/historis, bukan probabilitas hasil berikutnya**. Backtest yang baik pun tidak membuktikan bahwa proses sumber dapat diprediksi jika draw memang acak.
 
 ## Roadmap
 
 1. V0.1 — Worker + baseline analyzer
 2. V0.2 — interactive analyzer + Top 10 / Top 3 + rolling backtest
-3. **V0.3 — live collector + optional D1 storage + dedup period + hourly schedule**
-4. V0.4 — deep history import + multi-window / multi-model leaderboard
-5. V0.5 — calibration, model comparison, monitoring
-6. V1.0 — production dashboard + scheduled collection hardened
+3. V0.3 — live collector + D1 storage + dedup period + hourly schedule
+4. **V0.4 — multi-model analyzer + Ensemble Borda + model leaderboard**
+5. V0.5 — larger-history evaluation, calibration, stability windows, monitoring
+6. V1.0 — production dashboard + hardened scheduled collection
