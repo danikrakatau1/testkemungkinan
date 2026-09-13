@@ -1,6 +1,7 @@
 const V090_VERSION = "0.9.0";
 const nativeFetch = window.fetch.bind(window);
 let v090Timer = null;
+let versionObserver = null;
 
 function esc(value) {
   return String(value ?? "")
@@ -70,10 +71,25 @@ function injectPanel() {
 
 function markVersion() {
   const status = document.querySelector(".topbar .status");
-  if (status) status.innerHTML = '<span class="status-dot"></span> V0.9.0 · AutoPilot';
+  const desiredStatus = '<span class="status-dot"></span> V0.9.0 · AutoPilot';
+  if (status && status.innerHTML !== desiredStatus) status.innerHTML = desiredStatus;
   const updated = document.querySelector("#autoUpdated");
-  if (updated) updated.textContent = String(updated.textContent || "").replace(/V\d+\.\d+\.\d+/g, `V${V090_VERSION}`);
+  if (updated) {
+    const current = String(updated.textContent || "");
+    const next = current.match(/V\d+\.\d+\.\d+/)
+      ? current.replace(/V\d+\.\d+\.\d+/g, `V${V090_VERSION}`)
+      : `${current} · V${V090_VERSION}`;
+    if (current !== next) updated.textContent = next;
+  }
   document.title = `AutoPilot 3D · V${V090_VERSION}`;
+}
+
+function installVersionGuard() {
+  if (versionObserver) return;
+  const root = document.body;
+  if (!root) return;
+  versionObserver = new MutationObserver(() => markVersion());
+  versionObserver.observe(root, { childList: true, subtree: true, characterData: true });
 }
 
 function renderNumbers(pending) {
@@ -165,6 +181,7 @@ function init() {
     return;
   }
   markVersion();
+  installVersionGuard();
   attachRefreshHook();
   loadTwoStage();
   clearInterval(v090Timer);
