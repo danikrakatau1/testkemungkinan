@@ -1,4 +1,4 @@
-import { analyzeHistory } from "./analyzer.js";
+import { analyzeHistory, backtestHistory } from "./analyzer.js";
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -12,21 +12,37 @@ function json(data, status = 200) {
   });
 }
 
-async function handleAnalyze(request) {
-  let body;
+async function readJson(request) {
   try {
-    body = await request.json();
+    return await request.json();
   } catch {
-    return json({ ok: false, error: "Body harus JSON valid." }, 400);
+    throw new Error("Body harus JSON valid.");
   }
+}
 
+async function handleAnalyze(request) {
   try {
+    const body = await readJson(request);
     const result = analyzeHistory(body?.history, {
       decay: body?.decay,
     });
     return json({ ok: true, ...result });
   } catch (error) {
     return json({ ok: false, error: error?.message || "Analisis gagal." }, 400);
+  }
+}
+
+async function handleBacktest(request) {
+  try {
+    const body = await readJson(request);
+    const result = backtestHistory(body?.history, {
+      decay: body?.decay,
+      minTrain: body?.minTrain,
+      maxTrials: body?.maxTrials,
+    });
+    return json({ ok: true, ...result });
+  } catch (error) {
+    return json({ ok: false, error: error?.message || "Backtest gagal." }, 400);
   }
 }
 
@@ -38,7 +54,8 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.1.0",
+        version: "0.2.0",
+        endpoints: ["/api/analyze", "/api/backtest"],
         now: new Date().toISOString(),
       });
     }
@@ -48,6 +65,13 @@ export default {
         return json({ ok: false, error: "Gunakan POST." }, 405);
       }
       return handleAnalyze(request);
+    }
+
+    if (url.pathname === "/api/backtest") {
+      if (request.method !== "POST") {
+        return json({ ok: false, error: "Gunakan POST." }, 405);
+      }
+      return handleBacktest(request);
     }
 
     if (url.pathname.startsWith("/api/")) {
