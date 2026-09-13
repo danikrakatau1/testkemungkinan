@@ -1,12 +1,13 @@
 {
   "name": "testkemungkinan",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node ./scripts/smoke.mjs"
+    "check": "node ./scripts/smoke.mjs",
+    "d1:migrate": "wrangler d1 execute testkemungkinan-db --file=./migrations/0001_results_3d.sql --remote"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
