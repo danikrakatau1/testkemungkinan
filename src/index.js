@@ -3,8 +3,8 @@ import {
   backtestHistory,
   compareModels,
   listModels,
-  validateWeightedEnsemble,
 } from "./analyzer.js";
+import { validateWeightedEnsemble } from "./validation.js";
 import { collectAndPersist, fetchRecentResults, readStoredResults } from "./collector.js";
 
 const JSON_HEADERS = {
@@ -129,10 +129,10 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.5.0",
+        version: "0.5.1",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
-        validation: "chronological calibration + locked newest holdout",
+        validation: "CPU-safe chronological calibration + locked newest holdout",
         endpoints: [
           "/api/models",
           "/api/analyze",
@@ -149,7 +149,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.5.0", models: listModels() });
+      return json({ ok: true, version: "0.5.1", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
