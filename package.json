@@ -1,13 +1,13 @@
 {
   "name": "testkemungkinan",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node ./scripts/smoke.mjs && node ./scripts/keeper7-smoke.mjs && node ./scripts/adaptive-smoke.mjs",
-    "d1:migrate": "wrangler d1 execute testkemungkinan-db --file=./migrations/0001_results_3d.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0002_experiment_runs.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0003_forward_predictions.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0004_arena_forward.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0005_two_stage_forward.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0006_keeper7_forward.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0007_adaptive_error_learner.sql --remote"
+    "check": "node ./scripts/smoke.mjs && node ./scripts/keeper7-smoke.mjs && node ./scripts/adaptive-smoke.mjs && node ./scripts/europe-smoke.mjs",
+    "d1:migrate": "wrangler d1 execute testkemungkinan-db --file=./migrations/0001_results_3d.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0002_experiment_runs.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0003_forward_predictions.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0004_arena_forward.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0005_two_stage_forward.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0006_keeper7_forward.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0007_adaptive_error_learner.sql --remote && wrangler d1 execute testkemungkinan-db --file=./migrations/0008_europe_v1.sql --remote"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
