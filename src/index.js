@@ -13,6 +13,10 @@ import {
   saveExperiment,
 } from "./experiments.js";
 import {
+  createForwardPrediction,
+  listForwardPredictions,
+} from "./forward.js";
+import {
   backfillOlderResults,
   collectAndPersist,
   fetchRecentResults,
@@ -130,6 +134,28 @@ async function handleExperiments(request, url, env) {
   }
 }
 
+async function handleForward(request, url, env) {
+  if (!env?.DB) {
+    return json({ ok: false, storageConfigured: false, error: "D1 binding DB diperlukan untuk Forward Scorecard." }, 503);
+  }
+
+  try {
+    if (request.method === "POST") {
+      const body = await readJson(request);
+      const prediction = await createForwardPrediction(env.DB, body);
+      return json({ ok: true, prediction });
+    }
+    if (request.method === "GET") {
+      const limit = Number(url.searchParams.get("limit") || 30);
+      const predictions = await listForwardPredictions(env.DB, limit);
+      return json({ ok: true, count: predictions.length, predictions });
+    }
+    return json({ ok: false, error: "Gunakan GET atau POST." }, 405);
+  } catch (error) {
+    return json({ ok: false, error: error?.message || "Forward Scorecard gagal." }, 400);
+  }
+}
+
 function pagesFromUrl(url, fallback = 5) {
   const raw = Number(url.searchParams.get("pages") ?? fallback);
   if (!Number.isInteger(raw)) return fallback;
@@ -230,6 +256,14 @@ async function serveAsset(request, env, url) {
       html = html.replace("</body>", '  <script type="module" src="/v066.js"></script>\n</body>');
     }
   }
+  if (!html.includes("/v067.js")) {
+    const marker = '<script type="module" src="/v066.js"></script>';
+    if (html.includes(marker)) {
+      html = html.replace(marker, `${marker}\n  <script type="module" src="/v067.js"></script>`);
+    } else {
+      html = html.replace("</body>", '  <script type="module" src="/v067.js"></script>\n</body>');
+    }
+  }
 
   const headers = new Headers(response.headers);
   headers.delete("content-length");
@@ -245,10 +279,10 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.6.6",
+        version: "0.6.7",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
-        validation: "V0.5.4 single-window + V0.6.3 production walk-forward + V0.6.2 regime diagnostics + V0.6.4 parity + V0.6.5 reproducible experiment lock + V0.6.6 experiment drift tracker",
+        validation: "V0.5.4 single-window + V0.6.3 production walk-forward + V0.6.2 regime diagnostics + V0.6.4 parity + V0.6.5 reproducible experiment lock + V0.6.6 experiment drift tracker + V0.6.7 forward scorecard",
         multiWindowValidation: {
           defaultWindows: 8,
           targetsPerWindow: 18,
@@ -285,6 +319,21 @@ export default {
             "Top3 overlap",
           ],
         },
+        forwardScorecard: {
+          version: "0.6.7",
+          endpoint: "/api/forward",
+          storage: "D1 forward_predictions",
+          workflow: "explicit pre-result lock -> first later D1 period settles automatically",
+          diagnostics: [
+            "exact Top3 hit",
+            "exact Top10 hit",
+            "same-3-digit permutation hit",
+            "best single-candidate digit overlap",
+            "exact-position hits",
+            "Top3 pool digit coverage",
+            "actual full-ranking position",
+          ],
+        },
         regimeAnalysis: {
           requestCost: "none beyond multi-window run",
           diagnostics: [
@@ -305,6 +354,7 @@ export default {
           "/api/validate-window",
           "/api/validate-window-reference",
           "/api/experiments",
+          "/api/forward",
           "/api/source?pages=5",
           "/api/collect",
           "/api/backfill",
@@ -316,7 +366,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.6.6", models: listModels() });
+      return json({ ok: true, version: "0.6.7", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
@@ -351,6 +401,10 @@ export default {
 
     if (url.pathname === "/api/experiments") {
       return handleExperiments(request, url, env);
+    }
+
+    if (url.pathname === "/api/forward") {
+      return handleForward(request, url, env);
     }
 
     if (url.pathname === "/api/source") {
