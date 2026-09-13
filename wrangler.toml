@@ -5,3 +5,11 @@ compatibility_date = "2026-09-13"
 [assets]
 directory = "./public"
 binding = "ASSETS"
+
+[triggers]
+crons = ["7 * * * *"]
+
+# D1 storage is optional until a database is created in Cloudflare.
+# After creating the database, add a D1 binding named DB from the
+# Cloudflare dashboard (recommended) or add [[d1_databases]] here with
+# the real database_id. The Worker remains deployable without D1.
