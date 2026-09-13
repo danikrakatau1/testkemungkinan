@@ -222,6 +222,14 @@ async function serveAsset(request, env, url) {
       html = html.replace("</body>", '  <script type="module" src="/v065.js"></script>\n</body>');
     }
   }
+  if (!html.includes("/v066.js")) {
+    const marker = '<script type="module" src="/v065.js"></script>';
+    if (html.includes(marker)) {
+      html = html.replace(marker, `${marker}\n  <script type="module" src="/v066.js"></script>`);
+    } else {
+      html = html.replace("</body>", '  <script type="module" src="/v066.js"></script>\n</body>');
+    }
+  }
 
   const headers = new Headers(response.headers);
   headers.delete("content-length");
@@ -237,10 +245,10 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.6.5",
+        version: "0.6.6",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
-        validation: "V0.5.4 single-window + V0.6.3 production walk-forward + V0.6.2 regime diagnostics + V0.6.4 parity + V0.6.5 reproducible experiment lock",
+        validation: "V0.5.4 single-window + V0.6.3 production walk-forward + V0.6.2 regime diagnostics + V0.6.4 parity + V0.6.5 reproducible experiment lock + V0.6.6 experiment drift tracker",
         multiWindowValidation: {
           defaultWindows: 8,
           targetsPerWindow: 18,
@@ -261,6 +269,21 @@ export default {
           storage: "D1 experiment_runs",
           behavior: "completed multi-window runs are fingerprinted, deduplicated, persisted, and replayable from the frozen snapshot",
           version: "0.6.5",
+        },
+        driftTracker: {
+          version: "0.6.6",
+          requestCost: "read-only comparisons over persisted experiment summaries; latest pair also reads frozen snapshots",
+          diagnostics: [
+            "snapshot/data drift",
+            "parameter drift",
+            "engine-version drift",
+            "Top10 OOS delta",
+            "mean-rank delta",
+            "random-baseline delta change",
+            "stable-window delta",
+            "gate/regime transition",
+            "Top3 overlap",
+          ],
         },
         regimeAnalysis: {
           requestCost: "none beyond multi-window run",
@@ -293,7 +316,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.6.5", models: listModels() });
+      return json({ ok: true, version: "0.6.6", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
