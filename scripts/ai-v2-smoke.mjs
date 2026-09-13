@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import worker from "../src/index_v094.js";
 import {
   AI_V2_FEATURE_VERSION,
   AI_V2_PHASE,
@@ -15,6 +16,8 @@ assert.equal(AI_V2_FEATURE_VERSION, "phase0.features.v1");
 assert.equal(typeof ensureAiV2ObserverSchema, "function");
 assert.equal(typeof getAiV2ObserverStatus, "function");
 assert.equal(typeof runAiV2Observer, "function");
+assert.equal(typeof worker.fetch, "function");
+assert.equal(typeof worker.scheduled, "function");
 
 const observer = readFileSync(new URL("../src/ai_v2_observer.js", import.meta.url), "utf8");
 const index = readFileSync(new URL("../src/index_v094.js", import.meta.url), "utf8");
