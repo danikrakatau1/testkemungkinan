@@ -4,10 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#060913" />
-  <meta name="description" content="Dashboard eksperimen statistik 3 digit: live collector, multi-model ranking, Top 10, Top 3, statistik posisi, dan rolling backtest tanpa future leak." />
-  <title>Test Kemungkinan 3D · V0.4</title>
+  <meta name="description" content="Dashboard eksperimen statistik 3 digit: live collector, multi-model ranking, baseline random, holdout validation, Top 10, Top 3, dan rolling backtest tanpa future leak." />
+  <title>Test Kemungkinan 3D · V0.5</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/v04.css" />
+  <link rel="stylesheet" href="/v05.css" />
 </head>
 <body>
   <div class="shell">
@@ -16,7 +17,7 @@
         <div class="brand-mark">3D</div>
         <div class="brand-text">Test Kemungkinan</div>
       </div>
-      <div class="status"><span class="status-dot"></span> V0.4 · Multi-model lab</div>
+      <div class="status"><span class="status-dot"></span> V0.5 · Validation hardened</div>
     </header>
 
     <main>
@@ -24,8 +25,8 @@
         <article class="hero-copy">
           <p class="eyebrow">Statistical Ranking Lab</p>
           <h1>Analyzer 3 Digit.</h1>
-          <p class="lead">Collector menyimpan histori ke D1. Lima model kemudian dapat dibandingkan pada rolling backtest yang sama, tanpa melihat data masa depan, sebelum menghasilkan ranking kandidat 000–999.</p>
-          <div class="warning"><span>◇</span><span>Skor kandidat dan leaderboard adalah <strong>ukuran ranking historis, bukan probabilitas kemenangan</strong>. Jika sumber hasil benar-benar acak, pola historis tidak menjamin hasil berikutnya.</span></div>
+          <p class="lead">Collector menyimpan histori ke D1. Model dibandingkan pada rolling backtest, lalu V0.5 menambahkan baseline random, calibration window, locked holdout terbaru, dan validation gate sebelum weighted ensemble boleh dipromosikan.</p>
+          <div class="warning"><span>◇</span><span>Skor kandidat, confidence, dan leaderboard adalah <strong>ukuran evidence historis, bukan probabilitas kemenangan</strong>. Jika sumber hasil benar-benar acak, pola historis tidak menjamin hasil berikutnya.</span></div>
         </article>
 
         <aside class="panel quick-panel">
@@ -50,7 +51,7 @@
             <span class="small-badge">000–999</span>
           </div>
 
-          <div class="warning" id="collectorStatus"><span>◎</span><span><strong>Collector + D1 siap.</strong> Sync dapat mengambil hingga 10 halaman terbaru lalu menggabungkannya dengan histori permanen.</span></div>
+          <div class="warning" id="collectorStatus"><span>◎</span><span><strong>Collector + D1 siap.</strong> Sync dapat mengambil hingga 20 halaman terbaru lalu menggabungkannya dengan histori permanen.</span></div>
           <div class="input-actions">
             <button class="text-btn" id="liveBtn" type="button">Ambil Live 30</button>
             <button class="text-btn" id="syncBtn" type="button">Sync Collector</button>
@@ -87,10 +88,11 @@
             </div>
           </div>
 
-          <div class="action-row action-row-v04">
+          <div class="action-row action-row-v05">
             <button class="btn btn-primary" id="analyzeBtn" type="button">Analisis</button>
             <button class="btn btn-secondary" id="backtestBtn" type="button">Run Backtest</button>
             <button class="btn btn-lab" id="labBtn" type="button">Compare Models</button>
+            <button class="btn btn-validation" id="validateBtn" type="button">Run Validation</button>
           </div>
           <div class="error" id="errorBox" role="alert"></div>
         </aside>
@@ -131,7 +133,7 @@
             <div class="panel-title-row">
               <div>
                 <h2>Model Lab Leaderboard</h2>
-                <p class="panel-subtitle">Semua model diuji pada target historis yang sama dengan rolling-origin tanpa future leak.</p>
+                <p class="panel-subtitle">Semua model diuji pada target historis yang sama. V0.5 juga menilai apakah performanya benar-benar lebih baik daripada baseline random.</p>
               </div>
               <span class="small-badge">5 models</span>
             </div>
@@ -139,10 +141,38 @@
             <div class="leader-winner" id="leaderWinner"></div>
             <p class="leader-meta" id="leaderboardMeta"></p>
             <div class="table-wrap model-table-wrap">
-              <table class="model-table">
-                <thead><tr><th>#</th><th>Model</th><th>Leader</th><th>Top 3</th><th>Top 10</th><th>Top 25</th><th>Mean rank</th><th>Current Top 3</th></tr></thead>
+              <table class="model-table model-table-v05">
+                <thead><tr><th>#</th><th>Model</th><th>Leader</th><th>Top 3</th><th>Top 10</th><th>Top 25</th><th>Mean rank</th><th>Δ random</th><th>Baseline status</th><th>Current Top 3</th></tr></thead>
                 <tbody id="leaderboardBody"></tbody>
               </table>
+            </div>
+          </section>
+
+          <section class="panel validation-panel">
+            <div class="panel-title-row">
+              <div>
+                <h2>Validation Gate</h2>
+                <p class="panel-subtitle">Bobot model dituning hanya pada calibration window yang lebih lama. Target terbaru dikunci sebagai holdout dan tidak ikut tuning.</p>
+              </div>
+              <span class="small-badge">V0.5</span>
+            </div>
+            <div class="backtest-empty" id="validationEmpty">Klik <strong>Run Validation</strong>. Weighted ensemble tetap terkunci sampai calibration + holdout melewati gate konservatif vs random.</div>
+            <div class="validation-gate" id="validationGate"></div>
+            <div class="validation-metrics" id="validationMetrics"></div>
+            <div class="validation-grid">
+              <div class="validation-card">
+                <div class="validation-card-title">Calibration weights</div>
+                <div id="validationWeights"></div>
+              </div>
+              <div class="validation-card">
+                <div class="validation-card-title">Holdout comparison</div>
+                <div id="validationHoldout"></div>
+              </div>
+              <div class="validation-card">
+                <div class="validation-card-title">Weighted current Top 3</div>
+                <div id="validationTop3" class="validation-top3 mono">---</div>
+                <p class="validation-note">Jika gate masih LOCKED, ranking weighted ini hanya eksperimen dan tidak menggantikan Top 3 utama.</p>
+              </div>
             </div>
           </section>
 
@@ -164,8 +194,9 @@
               </div>
               <span class="small-badge" id="backtestModel">No future leak</span>
             </div>
-            <div class="backtest-empty" id="backtestEmpty">Klik <strong>Run Backtest</strong> untuk mengukur Top 3 / Top 10 hit-rate pada histori yang dimasukkan. Minimal data = Min Train + 1.</div>
+            <div class="backtest-empty" id="backtestEmpty">Klik <strong>Run Backtest</strong> untuk mengukur hit-rate dan evidence-vs-random. Minimal data = Min Train + 1.</div>
             <div class="backtest-metrics" id="backtestMetrics"></div>
+            <div class="baseline-banner" id="backtestBaseline"></div>
             <div class="table-wrap" style="margin-top:12px">
               <table>
                 <thead><tr><th>#</th><th>Target</th><th>Rank</th><th>Top 3</th><th>Top 10</th><th>Prediksi Top 3</th></tr></thead>
@@ -179,7 +210,7 @@
 
     <footer>
       <span>Standalone project · danikrakatau1/testkemungkinan</span>
-      <span>V0.4 · D1 collector + multi-model lab + rolling backtest</span>
+      <span>V0.5 · baseline evidence + calibration + locked holdout validation</span>
     </footer>
   </div>
 
