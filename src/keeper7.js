@@ -1,4 +1,4 @@
-export const KEEPER7_VERSION = "0.9.1";
+export const KEEPER7_VERSION = "0.9.2";
 
 const DIGITS = 10;
 const POSITIONS = 3;
@@ -7,12 +7,35 @@ const RECENT_WINDOWS = [8, 20, 50, 120];
 const RECENT_WEIGHTS = [0.34, 0.28, 0.22, 0.16];
 const EPS = 1e-9;
 
+export const DEFAULT_KEEPER7_WEIGHTS = Object.freeze({
+  recent: 0.36,
+  global: 0.19,
+  hour: 0.18,
+  transition: 0.17,
+  model: 0.10,
+});
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
 function round(value, digits = 4) {
   return Number(Number(value || 0).toFixed(digits));
+}
+
+function normalizeWeights(input = {}) {
+  const raw = {
+    recent: Number(input.recent ?? DEFAULT_KEEPER7_WEIGHTS.recent),
+    global: Number(input.global ?? DEFAULT_KEEPER7_WEIGHTS.global),
+    hour: Number(input.hour ?? DEFAULT_KEEPER7_WEIGHTS.hour),
+    transition: Number(input.transition ?? DEFAULT_KEEPER7_WEIGHTS.transition),
+    model: Number(input.model ?? DEFAULT_KEEPER7_WEIGHTS.model),
+  };
+  for (const key of Object.keys(raw)) {
+    if (!Number.isFinite(raw[key]) || raw[key] < 0) raw[key] = DEFAULT_KEEPER7_WEIGHTS[key];
+  }
+  const total = Object.values(raw).reduce((sum, value) => sum + value, 0) || 1;
+  return Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, value / total]));
 }
 
 export function normalize3(value) {
@@ -121,30 +144,47 @@ function recentPositionDistribution(rows, position) {
   return normalize(mixed);
 }
 
-function modelPositionEvidence(models) {
+function trustForModel(model, modelTrust = {}) {
+  const id = String(model?.id || "").toLowerCase();
+  const label = String(model?.label || "").toLowerCase();
+  const candidates = [
+    modelTrust[id],
+    modelTrust[label],
+    /two.?stage/i.test(label) ? modelTrust["two-stage"] : null,
+    /hybrid/i.test(label) ? modelTrust.hybrid : null,
+    /digit.?boost/i.test(label) ? modelTrust.digitboost : null,
+    /legacy/i.test(label) ? modelTrust.legacy : null,
+  ].map(Number).filter(Number.isFinite);
+  return clamp(candidates[0] ?? 1, 0.65, 1.35);
+}
+
+function modelPositionEvidence(models, modelTrust = {}) {
   const matrix = Array.from({ length: POSITIONS }, () => Array(DIGITS).fill(0.08));
   const candidates = [];
   for (const model of Array.isArray(models) ? models : []) {
     const label = String(model?.label || model?.id || "model");
     const top10 = (model?.top10 || model?.top3 || []).map((item) => normalize3(item?.number ?? item)).filter(Boolean).slice(0, 10);
     const top3 = (model?.top3 || []).map((item) => normalize3(item?.number ?? item)).filter(Boolean).slice(0, 3);
-    const modelWeight = /two.?stage/i.test(label) ? 1.05 : /hybrid/i.test(label) ? 1.02 : 1;
+    const baseWeight = /two.?stage/i.test(label) ? 1.05 : /hybrid/i.test(label) ? 1.02 : 1;
+    const adaptiveTrust = trustForModel(model, modelTrust);
+    const modelWeight = baseWeight * adaptiveTrust;
     top10.forEach((number, index) => {
       const rankWeight = modelWeight * (1 / (1 + index * 0.34));
       for (let position = 0; position < POSITIONS; position += 1) matrix[position][digitAt(number, position)] += rankWeight;
-      candidates.push({ number, weight: rankWeight, source: label, rank: index + 1 });
+      candidates.push({ number, weight: rankWeight, source: label, rank: index + 1, trust: adaptiveTrust });
     });
-    top3.forEach((number, index) => candidates.push({ number, weight: modelWeight * (1.4 - index * 0.18), source: label, rank: index + 1 }));
+    top3.forEach((number, index) => candidates.push({ number, weight: modelWeight * (1.4 - index * 0.18), source: label, rank: index + 1, trust: adaptiveTrust }));
   }
   return { distributions: matrix.map(normalize), candidates };
 }
 
-function buildPositionDistributions(rows, targetHour, models) {
+function buildPositionDistributions(rows, targetHour, models, inputWeights = {}, modelTrust = {}) {
+  const weights = normalizeWeights(inputWeights);
   const global = [];
   const recent = [];
   const hourly = [];
   const transition = [];
-  const model = modelPositionEvidence(models);
+  const model = modelPositionEvidence(models, modelTrust);
   const final = [];
   const diagnostics = [];
 
@@ -157,11 +197,11 @@ function buildPositionDistributions(rows, targetHour, models) {
     const modelDist = model.distributions[position];
 
     const combined = Array(DIGITS).fill(0).map((_, digit) => (
-      recentDist[digit] * 0.36 +
-      globalDist[digit] * 0.19 +
-      hour.distribution[digit] * 0.18 +
-      trans.distribution[digit] * 0.17 +
-      modelDist[digit] * 0.10
+      recentDist[digit] * weights.recent +
+      globalDist[digit] * weights.global +
+      hour.distribution[digit] * weights.hour +
+      trans.distribution[digit] * weights.transition +
+      modelDist[digit] * weights.model
     ));
 
     global.push(globalDist);
@@ -179,7 +219,37 @@ function buildPositionDistributions(rows, targetHour, models) {
     });
   }
 
-  return { final, global, recent, hourly, transition, model: model.distributions, modelCandidates: model.candidates, diagnostics };
+  return {
+    final,
+    global,
+    recent,
+    hourly,
+    transition,
+    model: model.distributions,
+    modelCandidates: model.candidates,
+    diagnostics,
+    weights,
+  };
+}
+
+export function buildKeeper7ComponentSnapshot(rowsInput, options = {}) {
+  const rows = sanitizeRows(rowsInput);
+  if (rows.length < 40) throw new Error("Component snapshot memerlukan minimal 40 result historis.");
+  const targetHour = Number.isInteger(options.targetHour) ? options.targetHour : nextHourFromRow(rows[0]);
+  const models = Array.isArray(options.models) ? options.models : [];
+  const distributions = buildPositionDistributions(rows, targetHour, models, options.weights, options.modelTrust);
+  return {
+    targetHour,
+    weights: distributions.weights,
+    components: {
+      recent: distributions.recent,
+      global: distributions.global,
+      hour: distributions.hourly,
+      transition: distributions.transition,
+      model: distributions.model,
+    },
+    diagnostics: distributions.diagnostics,
+  };
 }
 
 function generateCombinations() {
@@ -273,13 +343,14 @@ function digitRanking(positionDist, keepSet) {
   }));
 }
 
-function buildConsensusMap(models) {
+function buildConsensusMap(models, modelTrust = {}) {
   const map = new Map();
   for (const model of Array.isArray(models) ? models : []) {
     const label = String(model?.label || model?.id || "model");
+    const trust = trustForModel(model, modelTrust);
     const top10 = (model?.top10 || model?.top3 || []).map((item) => normalize3(item?.number ?? item)).filter(Boolean).slice(0, 10);
     top10.forEach((number, index) => {
-      const bonus = (11 - (index + 1)) / 10;
+      const bonus = ((11 - (index + 1)) / 10) * trust;
       const current = map.get(number) || { score: 0, sources: [] };
       current.score += bonus;
       if (!current.sources.includes(label)) current.sources.push(label);
@@ -291,9 +362,9 @@ function buildConsensusMap(models) {
   return map;
 }
 
-function assisted3DRanking(positionDist, keepSet, models) {
+function assisted3DRanking(positionDist, keepSet, models, modelTrust = {}) {
   const keep = new Set(keepSet);
-  const consensus = buildConsensusMap(models);
+  const consensus = buildConsensusMap(models, modelTrust);
   const rows = [];
   for (let n = 0; n <= 999; n += 1) {
     const number = String(n).padStart(3, "0");
@@ -342,13 +413,15 @@ export function runKeeper7Engine(rowsInput, options = {}) {
   if (rows.length < 40) throw new Error("7D Keeper memerlukan minimal 40 result historis.");
   const targetHour = Number.isInteger(options.targetHour) ? options.targetHour : nextHourFromRow(rows[0]);
   const models = Array.isArray(options.models) ? options.models : [];
-  const distributions = buildPositionDistributions(rows, targetHour, models);
+  const weights = normalizeWeights(options.weights);
+  const modelTrust = options.modelTrust && typeof options.modelTrust === "object" ? options.modelTrust : {};
+  const distributions = buildPositionDistributions(rows, targetHour, models, weights, modelTrust);
   const subsets = evaluateSubsets(rows, distributions.final, targetHour);
   const winner = subsets[0];
   const digitRanks = digitRanking(distributions.final, winner.set);
   const keepRanked = digitRanks.filter((row) => row.keep).map((row) => row.digit);
   const dropRanked = digitRanks.filter((row) => !row.keep).sort((a, b) => a.relativeScore - b.relativeScore || b.rank - a.rank).map((row) => row.digit);
-  const assisted = options.skipAssisted ? [] : assisted3DRanking(distributions.final, winner.set, models);
+  const assisted = options.skipAssisted ? [] : assisted3DRanking(distributions.final, winner.set, models, modelTrust);
 
   return {
     version: KEEPER7_VERSION,
@@ -373,6 +446,19 @@ export function runKeeper7Engine(rowsInput, options = {}) {
     assistedTop3: assisted.slice(0, 3),
     assistedTop10: assisted,
     diagnostics: distributions.diagnostics,
+    adaptiveWeights: Object.fromEntries(Object.entries(distributions.weights).map(([key, value]) => [key, round(value, 5)])),
+    modelTrust,
+    componentSnapshot: {
+      targetHour,
+      weights: distributions.weights,
+      components: {
+        recent: distributions.recent,
+        global: distributions.global,
+        hour: distributions.hourly,
+        transition: distributions.transition,
+        model: distributions.model,
+      },
+    },
     modelEvidenceSources: [...new Set((distributions.modelCandidates || []).map((row) => row.source))],
     randomUniformAll3BaselinePct: 34.3,
   };
@@ -414,6 +500,6 @@ export function walkForwardKeeper7(rowsInput, options = {}) {
     avgCovered: targets ? round(coveredTotal / targets, 3) : null,
     baselinePct: targets ? round(baselineTotal / targets * 100, 2) : null,
     uniformPositionBaselinePct: 34.3,
-    method: "chronological rolling-origin; intrinsic 7D engine only; no future model evidence",
+    method: "chronological rolling-origin; intrinsic default-weight 7D engine only; no future model evidence",
   };
 }
