@@ -1,6 +1,8 @@
 const DIGITS = 10;
 const POSITIONS = 3;
 const DEFAULT_DECAY = 0.90;
+const DEFAULT_MIN_TRAIN = 8;
+const DEFAULT_MAX_TRIALS = 200;
 
 function normalizeNumber(value) {
   const raw = String(value ?? "").trim();
@@ -20,6 +22,12 @@ function cube(a, b, c, initial = 0) {
 
 function safeProb(count, total, buckets, alpha = 0.25) {
   return (count + alpha) / (total + alpha * buckets);
+}
+
+function clampInteger(value, fallback, min, max) {
+  const n = Number(value);
+  if (!Number.isInteger(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
 }
 
 export function sanitizeHistory(input) {
@@ -42,7 +50,7 @@ export function buildModel(historyInput, options = {}) {
   let pairTotal = 0;
 
   // transitionCounts[pos][sourceDigit][targetDigit]
-  // History is newest -> oldest. For pair (history[i+1] -> history[i]),
+  // History order is newest -> oldest. For pair (history[i+1] -> history[i]),
   // history[i+1] is the older/source draw and history[i] is the next/target draw.
   const transitionCounts = cube(POSITIONS, DIGITS, DIGITS);
   const transitionTotals = matrix(POSITIONS, DIGITS);
@@ -203,14 +211,87 @@ export function analyzeHistory(historyInput, options = {}) {
 
   return {
     meta: {
-      model: "baseline-recency-position-transition-v0.1",
+      model: "recency-position-transition-v0.2",
       historyOrder: "newest-to-oldest",
       draws: history.length,
       decay: model.decay,
+      scoreMeaning: "relative-ranking-not-probability",
       disclaimer: "Ranking adalah skor statistik eksploratif dan tidak menjamin hasil berikutnya jika proses sumber bersifat acak.",
     },
     history: summarizeHistory(history),
     top10: ranking.slice(0, 10),
     top3: ranking.slice(0, 3),
+  };
+}
+
+export function backtestHistory(historyInput, options = {}) {
+  const history = sanitizeHistory(historyInput);
+  const minTrain = clampInteger(options.minTrain, DEFAULT_MIN_TRAIN, 3, 1000);
+  const maxTrials = clampInteger(options.maxTrials, DEFAULT_MAX_TRIALS, 1, 250);
+
+  if (history.length < minTrain + 1) {
+    throw new Error(`Backtest memerlukan minimal ${minTrain + 1} hasil valid.`);
+  }
+
+  // To predict history[targetIndex], training is history.slice(targetIndex + 1),
+  // which contains only draws older than the target. No future/newer draw leaks in.
+  const newestEligibleIndex = history.length - minTrain - 1;
+  const trialCount = Math.min(newestEligibleIndex + 1, maxTrials);
+  const startIndex = Math.max(0, newestEligibleIndex - trialCount + 1);
+
+  let top3Hits = 0;
+  let top10Hits = 0;
+  let rankSum = 0;
+  const trials = [];
+
+  for (let targetIndex = newestEligibleIndex; targetIndex >= startIndex; targetIndex -= 1) {
+    const target = history[targetIndex];
+    const training = history.slice(targetIndex + 1);
+    const model = buildModel(training, options);
+    const ranking = rankAll(model);
+    const targetRow = ranking.find((row) => row.number === target);
+    const rank = targetRow?.rank ?? 1000;
+    const hit3 = rank <= 3;
+    const hit10 = rank <= 10;
+
+    if (hit3) top3Hits += 1;
+    if (hit10) top10Hits += 1;
+    rankSum += rank;
+
+    trials.push({
+      target,
+      rank,
+      hit3,
+      hit10,
+      trainingDraws: training.length,
+      predictedTop3: ranking.slice(0, 3).map((row) => row.number),
+      predictedTop10: ranking.slice(0, 10).map((row) => row.number),
+    });
+  }
+
+  const total = trials.length;
+  const pct = (value) => Number(((value / total) * 100).toFixed(2));
+
+  return {
+    meta: {
+      model: "recency-position-transition-v0.2",
+      method: "rolling-origin-no-future-leak",
+      historyOrder: "newest-to-oldest",
+      minTrain,
+      maxTrials,
+      trials: total,
+      baselineTop3RandomPct: 0.3,
+      baselineTop10RandomPct: 1,
+      disclaimer: "Backtest historis mengukur perilaku model pada data lama; bukan jaminan performa hasil berikutnya.",
+    },
+    summary: {
+      trials: total,
+      top3Hits,
+      top10Hits,
+      top3HitRatePct: pct(top3Hits),
+      top10HitRatePct: pct(top10Hits),
+      meanTargetRank: Number((rankSum / total).toFixed(2)),
+    },
+    trials: trials.reverse().slice(0, 30),
   };
 }
