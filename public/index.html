@@ -4,9 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#060913" />
-  <meta name="description" content="Dashboard eksperimen statistik 3 digit: live collector, ranking Top 10, Top 3, statistik posisi, dan rolling backtest tanpa future leak." />
-  <title>Test Kemungkinan 3D · V0.3</title>
+  <meta name="description" content="Dashboard eksperimen statistik 3 digit: live collector, multi-model ranking, Top 10, Top 3, statistik posisi, dan rolling backtest tanpa future leak." />
+  <title>Test Kemungkinan 3D · V0.4</title>
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/v04.css" />
 </head>
 <body>
   <div class="shell">
@@ -15,7 +16,7 @@
         <div class="brand-mark">3D</div>
         <div class="brand-text">Test Kemungkinan</div>
       </div>
-      <div class="status"><span class="status-dot"></span> V0.3 · Collector live</div>
+      <div class="status"><span class="status-dot"></span> V0.4 · Multi-model lab</div>
     </header>
 
     <main>
@@ -23,8 +24,8 @@
         <article class="hero-copy">
           <p class="eyebrow">Statistical Ranking Lab</p>
           <h1>Analyzer 3 Digit.</h1>
-          <p class="lead">Ambil histori 3D langsung dari source atau masukkan manual. Engine memberi skor seluruh kandidat 000–999, menyusun Top 10, memilih Top 3, lalu dapat diuji ulang dengan rolling backtest tanpa melihat data masa depan.</p>
-          <div class="warning"><span>◇</span><span>Skor di dashboard adalah <strong>ranking relatif, bukan probabilitas kemenangan</strong>. Jika sumber hasil benar-benar acak, pola historis tidak menjamin hasil berikutnya.</span></div>
+          <p class="lead">Collector menyimpan histori ke D1. Lima model kemudian dapat dibandingkan pada rolling backtest yang sama, tanpa melihat data masa depan, sebelum menghasilkan ranking kandidat 000–999.</p>
+          <div class="warning"><span>◇</span><span>Skor kandidat dan leaderboard adalah <strong>ukuran ranking historis, bukan probabilitas kemenangan</strong>. Jika sumber hasil benar-benar acak, pola historis tidak menjamin hasil berikutnya.</span></div>
         </article>
 
         <aside class="panel quick-panel">
@@ -34,7 +35,7 @@
           </div>
           <div class="quick-meta">
             <div class="meta-box"><span>Data aktif</span><strong id="drawCount">0</strong></div>
-            <div class="meta-box"><span>Model</span><strong id="modelName">V0.3</strong></div>
+            <div class="meta-box"><span>Model aktif</span><strong id="modelName">Ensemble</strong></div>
           </div>
         </aside>
       </section>
@@ -49,10 +50,11 @@
             <span class="small-badge">000–999</span>
           </div>
 
-          <div class="warning" id="collectorStatus"><span>◎</span><span><strong>Live collector siap.</strong> Ambil 5 halaman terbaru (±30 draw) langsung dari source.</span></div>
+          <div class="warning" id="collectorStatus"><span>◎</span><span><strong>Collector + D1 siap.</strong> Sync dapat mengambil hingga 10 halaman terbaru lalu menggabungkannya dengan histori permanen.</span></div>
           <div class="input-actions">
             <button class="text-btn" id="liveBtn" type="button">Ambil Live 30</button>
             <button class="text-btn" id="syncBtn" type="button">Sync Collector</button>
+            <button class="text-btn" id="storedBtn" type="button">Muat D1</button>
             <button class="text-btn" id="sampleBtn" type="button">Muat contoh</button>
             <button class="text-btn" id="clearBtn" type="button">Kosongkan</button>
           </div>
@@ -60,7 +62,17 @@
           <textarea id="historyInput" inputmode="numeric" spellcheck="false" aria-label="Riwayat angka 3 digit"></textarea>
           <p class="hint">Boleh dipisahkan dengan baris baru, spasi, koma, atau titik koma. Angka seperti 007 tetap dipertahankan sebagai tiga digit.</p>
 
-          <div class="controls">
+          <div class="controls controls-v04">
+            <div class="field">
+              <label for="modelSelect">Model aktif</label>
+              <select id="modelSelect">
+                <option value="ensemble" selected>Ensemble Borda</option>
+                <option value="balanced">Balanced</option>
+                <option value="position">Position Focus</option>
+                <option value="transition">Transition Focus</option>
+                <option value="pair">Pair Focus</option>
+              </select>
+            </div>
             <div class="field">
               <label for="decay">Recency decay</label>
               <input id="decay" type="number" min="0.50" max="1" step="0.01" value="0.90" />
@@ -71,13 +83,14 @@
             </div>
             <div class="field">
               <label for="maxTrials">Max trials</label>
-              <input id="maxTrials" type="number" min="1" max="250" step="1" value="60" />
+              <input id="maxTrials" type="number" min="1" max="120" step="1" value="60" />
             </div>
           </div>
 
-          <div class="action-row">
+          <div class="action-row action-row-v04">
             <button class="btn btn-primary" id="analyzeBtn" type="button">Analisis</button>
             <button class="btn btn-secondary" id="backtestBtn" type="button">Run Backtest</button>
+            <button class="btn btn-lab" id="labBtn" type="button">Compare Models</button>
           </div>
           <div class="error" id="errorBox" role="alert"></div>
         </aside>
@@ -88,7 +101,7 @@
             <div class="panel-title-row">
               <div>
                 <h2>Top 3 Utama</h2>
-                <p class="panel-subtitle">Tiga kandidat dengan skor model tertinggi saat ini.</p>
+                <p class="panel-subtitle">Tiga kandidat dengan skor model aktif tertinggi saat ini.</p>
               </div>
               <span class="small-badge">Ranked</span>
             </div>
@@ -103,13 +116,32 @@
             <div class="panel-title-row">
               <div>
                 <h2>Top 10 Ranking</h2>
-                <p class="panel-subtitle">Skor dinormalisasi terhadap seluruh 1.000 kandidat.</p>
+                <p class="panel-subtitle">Skor dinormalisasi terhadap seluruh 1.000 kandidat. Pada Ensemble, badge kecil menunjukkan jumlah model yang menaruh kandidat di Top 10.</p>
               </div>
             </div>
             <div class="table-wrap">
               <table>
                 <thead><tr><th>Rank</th><th>Angka</th><th>Skor relatif</th><th>Posisi %</th><th>Transisi %</th></tr></thead>
                 <tbody id="top10Body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel model-lab-panel">
+            <div class="panel-title-row">
+              <div>
+                <h2>Model Lab Leaderboard</h2>
+                <p class="panel-subtitle">Semua model diuji pada target historis yang sama dengan rolling-origin tanpa future leak.</p>
+              </div>
+              <span class="small-badge">5 models</span>
+            </div>
+            <div class="backtest-empty" id="leaderboardEmpty">Klik <strong>Compare Models</strong> untuk menandingkan Balanced, Position, Transition, Pair, dan Ensemble.</div>
+            <div class="leader-winner" id="leaderWinner"></div>
+            <p class="leader-meta" id="leaderboardMeta"></p>
+            <div class="table-wrap model-table-wrap">
+              <table class="model-table">
+                <thead><tr><th>#</th><th>Model</th><th>Leader</th><th>Top 3</th><th>Top 10</th><th>Top 25</th><th>Mean rank</th><th>Current Top 3</th></tr></thead>
+                <tbody id="leaderboardBody"></tbody>
               </table>
             </div>
           </section>
@@ -128,9 +160,9 @@
             <div class="panel-title-row">
               <div>
                 <h2>Rolling Backtest</h2>
-                <p class="panel-subtitle">Setiap target hanya boleh memakai hasil yang lebih lama sebagai data latihan.</p>
+                <p class="panel-subtitle">Menguji model yang sedang dipilih. Setiap target hanya memakai hasil yang lebih lama sebagai data latihan.</p>
               </div>
-              <span class="small-badge">No future leak</span>
+              <span class="small-badge" id="backtestModel">No future leak</span>
             </div>
             <div class="backtest-empty" id="backtestEmpty">Klik <strong>Run Backtest</strong> untuk mengukur Top 3 / Top 10 hit-rate pada histori yang dimasukkan. Minimal data = Min Train + 1.</div>
             <div class="backtest-metrics" id="backtestMetrics"></div>
@@ -147,7 +179,7 @@
 
     <footer>
       <span>Standalone project · danikrakatau1/testkemungkinan</span>
-      <span>V0.3 · live collector + analyzer + backtest</span>
+      <span>V0.4 · D1 collector + multi-model lab + rolling backtest</span>
     </footer>
   </div>
 
