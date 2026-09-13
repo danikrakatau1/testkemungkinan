@@ -17,10 +17,12 @@ async function upgradedHealth(request, env, ctx) {
   data.version = VERSION;
   data.webglBackground = {
     version: VERSION,
-    engine: "WebGL2",
+    engine: "WebGL2 performance-safe",
     autoCycle: true,
     holdSeconds: 12,
-    transitionSeconds: 1.65,
+    transitionSeconds: 1.2,
+    targetFps: 24,
+    renderScale: "0.62 desktop / 0.52 compact",
     worlds: [
       "Fluid Nebula",
       "Gravitational Black Hole",
@@ -34,7 +36,7 @@ async function upgradedHealth(request, env, ctx) {
       "Eclipse",
       "Wormhole"
     ],
-    note: "11 worlds from the supplied cosmic direction; dashboard remains interactive above the canvas."
+    note: "Performance hotfix: lighter shader, capped render resolution/FPS, visibility pause, CSS fallback."
   };
   data.now = new Date().toISOString();
   return json(data, response.status);
@@ -48,10 +50,10 @@ async function injectV083(request, response) {
   if (!contentType.includes("text/html")) return response;
 
   let html = await response.text();
-  if (!html.includes("/v083.js")) {
+  if (!html.includes("/v083-perf.js")) {
     const marker = '<script type="module" src="/v082.js"></script>';
-    if (html.includes(marker)) html = html.replace(marker, `${marker}\n  <script type="module" src="/v083.js"></script>`);
-    else html = html.replace("</body>", '  <script type="module" src="/v083.js"></script>\n</body>');
+    if (html.includes(marker)) html = html.replace(marker, `${marker}\n  <script type="module" src="/v083-perf.js"></script>`);
+    else html = html.replace("</body>", '  <script type="module" src="/v083-perf.js"></script>\n</body>');
   }
 
   const headers = new Headers(response.headers);
