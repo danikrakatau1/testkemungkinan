@@ -1,4 +1,5 @@
 import { KEEPER7_VERSION, normalize3, runKeeper7Engine, sanitizeRows, walkForwardKeeper7 } from "./keeper7.js";
+import { getAdaptiveErrorState } from "./adaptive_learner.js";
 
 const HISTORY_LIMIT = 2000;
 const UNIFORM_ALL3_BASELINE = 0.343;
@@ -63,6 +64,8 @@ function mapRow(row) {
     assistedTop3: parseJson(row.assisted_top3_json, []),
     modelSources: parseJson(row.model_sources_json, []),
     validation: parseJson(row.validation_json, {}),
+    componentSnapshot: parseJson(row.component_snapshot_json, null),
+    adaptiveState: parseJson(row.adaptive_state_json, null),
     settledAt: row.settled_at,
     actualPeriod: row.actual_period == null ? null : Number(row.actual_period),
     actualResult: row.actual_result,
@@ -92,6 +95,8 @@ export async function ensureKeeper7Schema(db) {
       assisted_top3_json TEXT NOT NULL,
       model_sources_json TEXT NOT NULL,
       validation_json TEXT NOT NULL,
+      component_snapshot_json TEXT,
+      adaptive_state_json TEXT,
       status TEXT NOT NULL DEFAULT 'pending',
       settled_at TEXT,
       actual_period INTEGER,
@@ -102,6 +107,9 @@ export async function ensureKeeper7Schema(db) {
       assisted_exact_top3 INTEGER
     )
   `).run();
+  // Runtime-safe upgrade for databases created by V0.9.1. Duplicate-column errors are intentionally ignored.
+  try { await db.prepare("ALTER TABLE keeper7_forward_runs ADD COLUMN component_snapshot_json TEXT").run(); } catch {}
+  try { await db.prepare("ALTER TABLE keeper7_forward_runs ADD COLUMN adaptive_state_json TEXT").run(); } catch {}
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_keeper7_status ON keeper7_forward_runs(status, id DESC)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_keeper7_anchor ON keeper7_forward_runs(anchor_period DESC)").run();
   return true;
@@ -165,25 +173,39 @@ function conditionalRandomBaseline(result) {
   return numerator / denominator;
 }
 
-async function createLock(db, snapshot) {
+async function createLock(db, snapshot, adaptive) {
   if (!snapshot.latest || snapshot.rows.length < 60) return { created: false, reason: "insufficient-history" };
   if (await hasAnchor(db, snapshot.latest.period)) return { created: false, reason: "already-locked" };
 
   const models = await readModelEvidence(db, snapshot.latest.period);
-  const engine = runKeeper7Engine(snapshot.rows, { models });
-  // Keep rolling-origin validation intentionally CPU-safe on Workers. Each target still trains on all prior rows.
+  const engine = runKeeper7Engine(snapshot.rows, {
+    models,
+    weights: adaptive?.weights,
+    modelTrust: adaptive?.modelTrust,
+  });
+  // Historical OOS remains the fixed/default intrinsic engine, so the displayed
+  // validation is not contaminated by adaptive weights learned later in time.
   const validation = walkForwardKeeper7(snapshot.rows, { minTrain: 100, maxTargets: 24 });
   const fingerprint = await sha256(JSON.stringify(snapshot.rows.map((row) => [row.period, row.result, row.drawTime])));
   const lockKey = `${snapshot.latest.period}:${fingerprint}:keeper7:${KEEPER7_VERSION}`;
   const createdAt = new Date().toISOString();
+  const adaptiveLockState = adaptive ? {
+    version: adaptive.version,
+    phase: adaptive.phase,
+    latestActualPeriod: adaptive.latestActualPeriod,
+    keeperSettled: adaptive.keeperSettled,
+    weights: adaptive.weights,
+    modelTrust: adaptive.modelTrust,
+  } : null;
 
   await db.prepare(`
     INSERT OR IGNORE INTO keeper7_forward_runs (
       lock_key, created_at, anchor_period, anchor_result, target_hour,
       history_fingerprint, history_json, engine_version,
       keep7_json, drop3_json, digit_ranking_json, subset_json,
-      assisted_top3_json, model_sources_json, validation_json, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      assisted_top3_json, model_sources_json, validation_json,
+      component_snapshot_json, adaptive_state_json, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
   `).bind(
     lockKey,
     createdAt,
@@ -200,6 +222,8 @@ async function createLock(db, snapshot) {
     safeJson(engine.assistedTop3, []),
     safeJson(engine.modelEvidenceSources, []),
     safeJson(validation, {}),
+    safeJson(engine.componentSnapshot, null),
+    safeJson(adaptiveLockState, null),
   ).run();
 
   const query = await db.prepare("SELECT * FROM keeper7_forward_runs WHERE lock_key = ? LIMIT 1").bind(lockKey).all();
@@ -298,6 +322,7 @@ function compact(row) {
     assistedTop3: row.assistedTop3,
     modelSources: row.modelSources,
     validation: row.validation,
+    adaptiveState: row.adaptiveState,
     actualPeriod: row.actualPeriod,
     actualResult: row.actualResult,
     coveredPositions: row.coveredPositions,
@@ -312,8 +337,11 @@ export async function runKeeper7Pilot(env) {
   const db = env.DB;
   await ensureKeeper7Schema(db);
   await settleOpenKeeper7(db);
+  // Learner is computed only after old locks are settled. The resulting state is
+  // then frozen into the next lock, so an actual result never edits its own prediction.
+  const adaptive = await getAdaptiveErrorState(db);
   const snapshot = await readSnapshot(db);
-  const creation = await createLock(db, snapshot);
+  const creation = await createLock(db, snapshot, adaptive);
   const rows = await listKeeper7Forward(db, 60);
   const pending = rows.find((row) => row.status === "pending") || null;
   const last = rows.find((row) => row.status === "settled") || null;
@@ -322,17 +350,18 @@ export async function runKeeper7Pilot(env) {
   return {
     ok: true,
     version: KEEPER7_VERSION,
-    engine: "7D Historical Keeper / 3D Eliminator",
-    mode: "ONE OFFICIAL KEEP7 PER DRAW",
+    engine: "7D Historical Keeper / 3D Eliminator + Adaptive Error Learner",
+    mode: "ONE OFFICIAL KEEP7 PER DRAW · FORWARD-ONLY LEARNING",
     latest: snapshot.latest,
     draws,
     created: creation.created,
     pending: compact(pending),
     last: compact(last),
     forward: aggregate(rows),
+    adaptive,
     baseline: {
       uniformAll3Pct: 34.3,
-      note: "Primary KPI is ALL-3 coverage. Minimal 1-digit coverage is intentionally not used as the success KPI.",
+      note: "Primary KPI is ALL-3 coverage. Adaptive weights learn only from already-settled forward errors; old locks are never rewritten.",
     },
     now: new Date().toISOString(),
   };
