@@ -1,15 +1,16 @@
 const RANDOM_MEAN_RANK = 500.5;
 const RANDOM_RANK_VARIANCE = (1000 ** 2 - 1) / 12;
 const RANDOM_TOP10 = 0.01;
-const WINDOW_TARGETS = 30;
-const WINDOWS_DEFAULT = 5;
+const WINDOW_TARGETS = 18;
+const WINDOW_HOLDOUT = 6;
+const WINDOWS_DEFAULT = 8;
+const WINDOW_DELAY_MS = 350;
 
 const els = {
   button: document.querySelector("#multiValidateBtn"),
   historyInput: document.querySelector("#historyInput"),
   decay: document.querySelector("#decay"),
   minTrain: document.querySelector("#minTrain"),
-  maxTrials: document.querySelector("#maxTrials"),
   empty: document.querySelector("#multiWindowEmpty"),
   gate: document.querySelector("#multiWindowGate"),
   metrics: document.querySelector("#multiWindowMetrics"),
@@ -27,6 +28,10 @@ function round(value, digits = 2) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function erf(x) {
@@ -72,15 +77,21 @@ function parseHistory() {
   return tokens.map((token) => token.padStart(3, "0"));
 }
 
-async function postJson(path, payload) {
-  const response = await fetch(path, {
+async function postWindow(payload, attempt = 0) {
+  const response = await fetch("/api/validate-window", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data.ok) throw new Error(data.error || `Request gagal (${response.status})`);
-  return data;
+  if (response.ok && data.ok) return data;
+
+  const message = data.error || `Request gagal (${response.status})`;
+  if (response.status === 503 && attempt < 2) {
+    await sleep(900 * (attempt + 1));
+    return postWindow(payload, attempt + 1);
+  }
+  throw new Error(message);
 }
 
 function summarizeRanks(ranks = []) {
@@ -112,11 +123,9 @@ function aggregateWeights(windows) {
   const totals = new Map();
   for (const window of windows) {
     for (const row of window.weights || []) {
-      totals.set(row.id, {
-        id: row.id,
-        label: row.label,
-        sum: (totals.get(row.id)?.sum || 0) + Number(row.weightPct || 0),
-      });
+      const previous = totals.get(row.id) || { id: row.id, label: row.label, sum: 0 };
+      previous.sum += Number(row.weightPct || 0);
+      totals.set(row.id, previous);
     }
   }
   return [...totals.values()].map((row) => ({
@@ -146,10 +155,9 @@ function setError(message = "") {
 }
 
 function setBusy(busy) {
-  if (els.button) {
-    els.button.disabled = busy;
-    els.button.textContent = busy ? "Running Windows…" : "Run Multi-Window";
-  }
+  if (!els.button) return;
+  els.button.disabled = busy;
+  els.button.textContent = busy ? "Running Windows…" : "Run Multi-Window";
 }
 
 function renderProgress(done, total) {
@@ -161,6 +169,7 @@ function renderProgress(done, total) {
 
 function renderMultiWindow(windows) {
   if (els.empty) els.empty.hidden = true;
+
   const weightedRanks = windows.flatMap((window) => (window.holdout?.trials || []).map((row) => row.weightedRank));
   const bordaRanks = windows.flatMap((window) => (window.holdout?.trials || []).map((row) => row.bordaRank));
   const weighted = summarizeRanks(weightedRanks);
@@ -168,8 +177,9 @@ function renderMultiWindow(windows) {
   const positiveMeanWindows = windows.filter((window) => Number(window.holdout?.weighted?.evidence?.meanRankDelta || 0) > 0).length;
   const gatePassWindows = windows.filter((window) => window.gate?.passed).length;
   const minStableWindows = Math.ceil(windows.length * 0.6);
+
   const aggregatePassed = (
-    weighted.trials >= 50 &&
+    weighted.trials >= 42 &&
     weighted.meanRankDelta > 0 &&
     weighted.pTop10 <= 0.10 &&
     weighted.pMeanRank <= 0.20 &&
@@ -189,14 +199,14 @@ function renderMultiWindow(windows) {
       <div class="gate-confidence">
         <span>Out-of-sample</span>
         <strong>${weighted.trials} target</strong>
-        <small>${windows.length} window × 10 holdout</small>
+        <small>${windows.length} window × ${WINDOW_HOLDOUT} holdout</small>
       </div>
     `;
   }
 
   if (els.metrics) {
     els.metrics.innerHTML = `
-      <div class="metric"><span>Windows</span><strong>${windows.length}</strong><small>${windows.length * 30} evaluated targets</small></div>
+      <div class="metric"><span>Windows</span><strong>${windows.length}</strong><small>${windows.length * WINDOW_TARGETS} evaluated targets</small></div>
       <div class="metric"><span>Locked holdout</span><strong>${weighted.trials}</strong><small>aggregate OOS targets</small></div>
       <div class="metric"><span>Weighted Top10</span><strong>${weighted.top10HitRatePct.toFixed(2)}%</strong><small>${weighted.top10Hits} hit</small></div>
       <div class="metric"><span>Weighted mean rank</span><strong>${weighted.meanTargetRank.toFixed(1)}</strong><small>Δ ${weighted.meanRankDelta >= 0 ? "+" : ""}${weighted.meanRankDelta.toFixed(1)}</small></div>
@@ -212,12 +222,12 @@ function renderMultiWindow(windows) {
       return `
         <tr>
           <td class="rank-cell">W${index + 1}</td>
-          <td class="mono">${offset}–${offset + 29}</td>
+          <td class="mono">${offset}–${offset + WINDOW_TARGETS - 1}</td>
           <td class="mono">${w.trials}</td>
           <td class="mono">${w.top10HitRatePct.toFixed(2)}% (${w.top10Hits})</td>
           <td class="mono">#${w.meanTargetRank.toFixed(1)}</td>
           <td class="mono ${w.evidence.meanRankDelta > 0 ? "hit" : "miss"}">${w.evidence.meanRankDelta > 0 ? "+" : ""}${w.evidence.meanRankDelta.toFixed(1)}</td>
-          <td><span class="evidence-pill ${window.gate.passed ? "evidence-good" : "evidence-bad"}">${window.gate.passed ? "validated" : "locked"}</span></td>
+          <td><span class="evidence-pill ${window.gate.passed ? "evidence-good" : "evidence-bad"}">${window.gate.passed ? "pass" : "locked"}</span></td>
           <td class="mono current-top3">${(window.currentWeighted?.top3 || []).map((row) => row.number).join(" · ")}</td>
         </tr>
       `;
@@ -240,7 +250,7 @@ function renderMultiWindow(windows) {
       <div class="holdout-row"><span>Weighted aggregate</span><strong>Top10 ${weighted.top10HitRatePct.toFixed(2)}%</strong><em>Mean #${weighted.meanTargetRank.toFixed(1)}</em></div>
       <div class="holdout-row"><span>Equal Borda aggregate</span><strong>Top10 ${borda.top10HitRatePct.toFixed(2)}%</strong><em>Mean #${borda.meanTargetRank.toFixed(1)}</em></div>
       <div class="holdout-row"><span>Random reference</span><strong>Top10 1.00%</strong><em>Mean #500.5</em></div>
-      <div class="holdout-row"><span>Single-window gates</span><strong>${gatePassWindows}/${windows.length} pass</strong><em>diagnostic only</em></div>
+      <div class="holdout-row"><span>Diagnostic window gates</span><strong>${gatePassWindows}/${windows.length} pass</strong><em>aggregate tetap evaluator utama</em></div>
     `;
   }
 
@@ -261,29 +271,33 @@ async function runMultiWindow() {
     const decay = Number(els.decay?.value || 0.9);
     const available = Math.floor((history.length - minTrain) / WINDOW_TARGETS);
     const windowCount = Math.min(WINDOWS_DEFAULT, available);
+
     if (windowCount < 2) {
-      throw new Error("Multi-Window membutuhkan histori lebih panjang. Muat D1 dan gunakan minimal sekitar 70 draw.");
+      throw new Error("Multi-Window membutuhkan histori lebih panjang. Muat D1 dan gunakan minimal sekitar 50 draw.");
     }
 
     const windows = [];
     renderProgress(0, windowCount);
+
     for (let index = 0; index < windowCount; index += 1) {
       const offset = index * WINDOW_TARGETS;
       if (els.gate) {
         els.gate.className = "validation-gate gate-running";
-        els.gate.innerHTML = `<div><span>Multi-window progress</span><strong>Window ${index + 1}/${windowCount}</strong><p>Menjalankan CPU-safe validation secara berurutan agar tidak menabrak limit Worker.</p></div>`;
+        els.gate.innerHTML = `<div><span>Multi-window progress</span><strong>Window ${index + 1}/${windowCount}</strong><p>Menjalankan lightweight walk-forward window. Tiap request lebih kecil agar aman dari CPU 503.</p></div>`;
       }
-      const data = await postJson("/api/validate", {
+
+      const data = await postWindow({
         history: history.slice(offset),
         decay,
         minTrain,
-        maxTrials: WINDOW_TARGETS,
-        holdoutTrials: 10,
       });
       data._offset = offset;
       windows.push(data);
       renderProgress(index + 1, windowCount);
+
+      if (index < windowCount - 1) await sleep(WINDOW_DELAY_MS);
     }
+
     renderMultiWindow(windows);
   } catch (error) {
     setError(error.message || "Multi-Window Validation gagal.");
