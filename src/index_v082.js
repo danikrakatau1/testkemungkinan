@@ -18,7 +18,7 @@ async function upgradedHealth(request, env, ctx) {
   data.motionUI = {
     version: VERSION,
     style: "minimal living UI",
-    background: "lightweight animated aurora + grid + grain, adapted from the supplied cosmic direction without WebGL overhead",
+    background: "visible animated aurora + grid + grain with stacking-context hotfix, no WebGL overhead",
     typography: "ChatGPT-like system sans stack; no bundled proprietary font files",
     interactions: [
       "model-card spotlight and hover lift",
@@ -47,6 +47,11 @@ async function injectV082(request, response) {
     const marker = '<script type="module" src="/v081.js"></script>';
     if (html.includes(marker)) html = html.replace(marker, `${marker}\n  <script type="module" src="/v082.js"></script>`);
     else html = html.replace("</body>", '  <script type="module" src="/v082.js"></script>\n</body>');
+  }
+  if (!html.includes("/v082-bgfix.js")) {
+    const marker = '<script type="module" src="/v082.js"></script>';
+    if (html.includes(marker)) html = html.replace(marker, `${marker}\n  <script type="module" src="/v082-bgfix.js"></script>`);
+    else html = html.replace("</body>", '  <script type="module" src="/v082-bgfix.js"></script>\n</body>');
   }
 
   const headers = new Headers(response.headers);
