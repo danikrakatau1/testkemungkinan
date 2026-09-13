@@ -1,4 +1,10 @@
-import { analyzeHistory, backtestHistory, compareModels, listModels } from "./analyzer.js";
+import {
+  analyzeHistory,
+  backtestHistory,
+  compareModels,
+  listModels,
+  validateWeightedEnsemble,
+} from "./analyzer.js";
 import { collectAndPersist, fetchRecentResults, readStoredResults } from "./collector.js";
 
 const JSON_HEADERS = {
@@ -24,6 +30,7 @@ function analysisOptions(body = {}) {
     minTrain: body?.minTrain,
     maxTrials: body?.maxTrials,
     modelId: body?.modelId,
+    holdoutTrials: body?.holdoutTrials,
   };
 }
 
@@ -51,6 +58,15 @@ async function handleLeaderboard(request) {
     return json({ ok: true, ...compareModels(body?.history, analysisOptions(body)) });
   } catch (error) {
     return json({ ok: false, error: error?.message || "Perbandingan model gagal." }, 400);
+  }
+}
+
+async function handleValidation(request) {
+  try {
+    const body = await readJson(request);
+    return json({ ok: true, ...validateWeightedEnsemble(body?.history, analysisOptions(body)) });
+  } catch (error) {
+    return json({ ok: false, error: error?.message || "Validation Gate gagal." }, 400);
   }
 }
 
@@ -113,14 +129,16 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.4.0",
+        version: "0.5.0",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
+        validation: "chronological calibration + locked newest holdout",
         endpoints: [
           "/api/models",
           "/api/analyze",
           "/api/backtest",
           "/api/leaderboard",
+          "/api/validate",
           "/api/source?pages=5",
           "/api/collect",
           "/api/history?limit=500",
@@ -131,7 +149,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.4.0", models: listModels() });
+      return json({ ok: true, version: "0.5.0", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
@@ -147,6 +165,11 @@ export default {
     if (url.pathname === "/api/leaderboard") {
       if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST." }, 405);
       return handleLeaderboard(request);
+    }
+
+    if (url.pathname === "/api/validate") {
+      if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST." }, 405);
+      return handleValidation(request);
     }
 
     if (url.pathname === "/api/source") {
