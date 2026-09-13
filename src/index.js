@@ -5,6 +5,7 @@ import {
   listModels,
 } from "./analyzer.js";
 import { validateWeightedEnsemble } from "./validation.js";
+import { validateWalkForwardWindow } from "./validation_window.js";
 import {
   backfillOlderResults,
   collectAndPersist,
@@ -72,6 +73,15 @@ async function handleValidation(request) {
     return json({ ok: true, ...validateWeightedEnsemble(body?.history, analysisOptions(body)) });
   } catch (error) {
     return json({ ok: false, error: error?.message || "Validation Gate gagal." }, 400);
+  }
+}
+
+async function handleValidationWindow(request) {
+  try {
+    const body = await readJson(request);
+    return json({ ok: true, ...validateWalkForwardWindow(body?.history, analysisOptions(body)) });
+  } catch (error) {
+    return json({ ok: false, error: error?.message || "Walk-forward window gagal." }, 400);
   }
 }
 
@@ -158,17 +168,18 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.6.0",
+        version: "0.6.1",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
-        validation: "V0.5.4 CPU-safe single-window engine + V0.6 sequential 5-window walk-forward orchestration",
+        validation: "V0.5.4 single-window + V0.6.1 lightweight walk-forward windows",
         multiWindowValidation: {
-          defaultWindows: 5,
-          targetsPerWindow: 30,
-          calibrationPerWindow: 20,
-          lockedHoldoutPerWindow: 10,
-          defaultAggregateHoldoutTargets: 50,
-          requestStrategy: "sequential browser requests to /api/validate",
+          defaultWindows: 8,
+          targetsPerWindow: 18,
+          calibrationPerWindow: 12,
+          lockedHoldoutPerWindow: 6,
+          defaultAggregateHoldoutTargets: 48,
+          trainingDrawsPerTarget: 80,
+          requestStrategy: "sequential browser requests to /api/validate-window with retry/backoff",
         },
         historyCollection: "5 recent pages + incremental 5-page older backfill per manual sync; dedicated /api/backfill available",
         endpoints: [
@@ -177,6 +188,7 @@ export default {
           "/api/backtest",
           "/api/leaderboard",
           "/api/validate",
+          "/api/validate-window",
           "/api/source?pages=5",
           "/api/collect",
           "/api/backfill",
@@ -188,7 +200,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.6.0", models: listModels() });
+      return json({ ok: true, version: "0.6.1", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
@@ -209,6 +221,11 @@ export default {
     if (url.pathname === "/api/validate") {
       if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST." }, 405);
       return handleValidation(request);
+    }
+
+    if (url.pathname === "/api/validate-window") {
+      if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST." }, 405);
+      return handleValidationWindow(request);
     }
 
     if (url.pathname === "/api/source") {
