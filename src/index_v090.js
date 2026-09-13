@@ -21,24 +21,6 @@ async function handleTwoStage(_request, env) {
   }
 }
 
-async function augmentAutoPilot(request, env, ctx) {
-  const response = await baseWorker.fetch(request, env, ctx);
-  const contentType = response.headers.get("content-type") || "";
-  if (!contentType.includes("application/json")) return response;
-
-  const data = await response.json().catch(() => ({}));
-  if (response.ok && data?.ok && env?.DB) {
-    try {
-      data.twoStage = await runTwoStagePilot(env);
-      data.version = VERSION;
-      if (data.pipeline) data.pipeline.twoStageCreated = Boolean(data.twoStage?.created);
-    } catch (error) {
-      data.twoStage = { ok: false, version: VERSION, error: error?.message || "Two-Stage unavailable" };
-    }
-  }
-  return json(data, response.status);
-}
-
 async function upgradedHealth(request, env, ctx) {
   const response = await baseWorker.fetch(request, env, ctx);
   const data = await response.json().catch(() => ({}));
@@ -59,6 +41,11 @@ async function upgradedHealth(request, env, ctx) {
     windows: [4, 8, 12, 20, 40],
     regimes: ["persistent", "returning", "rotating", "volatile", "transitioning"],
     promotionPolicy: "must beat current engines in forward testing; no accuracy guarantee"
+  };
+  data.performance = {
+    autopilotStatus: "fast-path",
+    twoStage: "separate endpoint",
+    note: "Core /api/autopilot no longer waits for Two-Stage computation."
   };
   data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/two-stage"]));
   data.now = new Date().toISOString();
@@ -89,7 +76,9 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/api/two-stage") return handleTwoStage(request, env);
-    if (url.pathname === "/api/autopilot") return augmentAutoPilot(request, env, ctx);
+    // Keep the core dashboard responsive: let the existing AutoPilot endpoint return immediately.
+    // V0.9.0 loads its challenger independently from /api/two-stage.
+    if (url.pathname === "/api/autopilot") return baseWorker.fetch(request, env, ctx);
     if (url.pathname === "/api/health") return upgradedHealth(request, env, ctx);
 
     const response = await baseWorker.fetch(request, env, ctx);
