@@ -5,6 +5,7 @@ import {
   listModels,
 } from "../src/analyzer.js";
 import { validateWeightedEnsemble } from "../src/validation.js";
+import { validateWalkForwardWindow } from "../src/validation_window.js";
 import { parseResultPage } from "../src/collector.js";
 
 const history = [
@@ -21,45 +22,34 @@ const analysis = analyzeHistory(history, { decay: 0.9, modelId: "ensemble" });
 const backtest = backtestHistory(history, { decay: 0.9, modelId: "balanced", minTrain: 8, maxTrials: 20 });
 const comparison = compareModels(history, { decay: 0.9, minTrain: 8, maxTrials: 20 });
 const validation = validateWeightedEnsemble(validationHistory, { decay: 0.9, minTrain: 8, maxTrials: 30, holdoutTrials: 10 });
-const secondWindow = validateWeightedEnsemble(validationHistory.slice(30), { decay: 0.9, minTrain: 8, maxTrials: 30, holdoutTrials: 10 });
+const windowValidation = validateWalkForwardWindow(validationHistory, { decay: 0.9, minTrain: 8 });
 const models = listModels();
 
-if (analysis.top3.length !== 3 || analysis.top10.length !== 10) {
-  throw new Error("Analyzer ranking length invalid.");
-}
+if (analysis.top3.length !== 3 || analysis.top10.length !== 10) throw new Error("Analyzer ranking length invalid.");
+if (!analysis.top3.every((row) => /^\d{3}$/.test(row.number))) throw new Error("Analyzer returned an invalid 3-digit candidate.");
+if (!analysis.top3.every((row) => row.consensus && row.consensus.models === 4)) throw new Error("Ensemble consensus metadata missing.");
+if (backtest.summary.trials < 1 || !backtest.evidence?.pValues) throw new Error("Backtest evidence invalid.");
+if (models.length !== 5 || comparison.leaderboard.length !== 5 || !comparison.winner) throw new Error("Model leaderboard invalid.");
+if (!comparison.leaderboard.every((row) => row.evidence && Number.isFinite(row.evidence.meanRankDelta))) throw new Error("Leaderboard baseline evidence missing.");
 
-if (!analysis.top3.every((row) => /^\d{3}$/.test(row.number))) {
-  throw new Error("Analyzer returned an invalid 3-digit candidate.");
-}
+const validationWeightSum = validation.weights.reduce((total, row) => total + row.weight, 0);
+if (
+  validation.meta.calibrationTrials !== 20 ||
+  validation.meta.holdoutTrials !== 10 ||
+  Math.abs(validationWeightSum - 1) > 0.01 ||
+  validation.currentWeighted.top3.length !== 3 ||
+  validation.holdout.trials.length !== 10
+) throw new Error("Single-window Validation Gate output invalid.");
 
-if (!analysis.top3.every((row) => row.consensus && row.consensus.models === 4)) {
-  throw new Error("Ensemble consensus metadata missing.");
-}
-
-if (backtest.summary.trials < 1 || !backtest.evidence?.pValues) {
-  throw new Error("Backtest evidence invalid.");
-}
-
-if (models.length !== 5 || comparison.leaderboard.length !== 5 || !comparison.winner) {
-  throw new Error("Model leaderboard invalid.");
-}
-
-if (!comparison.leaderboard.every((row) => row.evidence && Number.isFinite(row.evidence.meanRankDelta))) {
-  throw new Error("Leaderboard baseline evidence missing.");
-}
-
-for (const [index, result] of [validation, secondWindow].entries()) {
-  const weightSum = result.weights.reduce((total, row) => total + row.weight, 0);
-  if (
-    result.meta.calibrationTrials !== 20 ||
-    result.meta.holdoutTrials !== 10 ||
-    Math.abs(weightSum - 1) > 0.01 ||
-    result.currentWeighted.top3.length !== 3 ||
-    result.holdout.trials.length !== 10
-  ) {
-    throw new Error(`Validation window ${index + 1} output invalid.`);
-  }
-}
+const windowWeightSum = windowValidation.weights.reduce((total, row) => total + row.weight, 0);
+if (
+  windowValidation.meta.calibrationTrials !== 12 ||
+  windowValidation.meta.holdoutTrials !== 6 ||
+  windowValidation.meta.trainingWindowDraws !== 80 ||
+  Math.abs(windowWeightSum - 1) > 0.01 ||
+  windowValidation.currentWeighted.top3.length !== 3 ||
+  windowValidation.holdout.trials.length !== 6
+) throw new Error("Lightweight walk-forward window output invalid.");
 
 const collectorFixture = `
   <div>Sunday, September 13, 2026</div>
@@ -77,23 +67,18 @@ const collectorFixture = `
 `;
 
 const parsed = parseResultPage(collectorFixture, 1);
-if (parsed.length !== 2 || parsed[0].period !== 25532 || parsed[0].result !== "572") {
-  throw new Error("Collector parser fixture failed.");
-}
+if (parsed.length !== 2 || parsed[0].period !== 25532 || parsed[0].result !== "572") throw new Error("Collector parser fixture failed.");
 
 console.log(JSON.stringify({
   ok: true,
-  version: "0.6.0",
+  version: "0.6.1",
   newest: analysis.history.newest,
-  activeModel: analysis.meta.model,
   top3: analysis.top3.map((row) => row.number),
   backtestTrials: backtest.summary.trials,
-  backtestEvidence: backtest.evidence.status,
   modelWinner: comparison.winner.id,
-  modelWinnerBaseline: comparison.winner.evidence.status,
-  validationGate: validation.gate.status,
   validationSplit: `${validation.meta.calibrationTrials}+${validation.meta.holdoutTrials}`,
-  secondWindowGate: secondWindow.gate.status,
+  walkForwardSplit: `${windowValidation.meta.calibrationTrials}+${windowValidation.meta.holdoutTrials}`,
+  walkForwardTrainingWindow: windowValidation.meta.trainingWindowDraws,
   models: models.map((model) => model.id),
   collectorFixture: parsed.map((row) => `${row.period}:${row.result}`),
 }, null, 2));
