@@ -1,8 +1,11 @@
 const AI2_UI_VERSION = "0.9.4";
 const AI2_ACTIVE_KEY = "testkemungkinan-ai-v2-active";
+const AI2_HISTORY_LIMIT_KEY = "testkemungkinan-ai-v2-history-limit";
 const ai2Fetch = window.fetch.bind(window);
 let ai2Timer = null;
 let ai2Syncing = false;
+let ai2HistoryData = { utama: [], europe: [] };
+let ai2HistoryLimit = "10";
 
 function ai2Esc(value) {
   return String(value ?? "")
@@ -93,6 +96,54 @@ function ai2CreateShell() {
         </div>
       </section>
 
+      <section class="ai2-section ai2-history-section">
+        <div class="ai2-section-head ai2-history-head">
+          <div>
+            <h2>Histori Result & Histori Tebakan</h2>
+            <p><strong>ACTUAL RESULT</strong> dipisahkan dari <strong>LOCKED PREDICTION</strong>. Semua tebakan di bawah berasal dari lock asli yang sudah ada sebelum result keluar; prediksi lama tidak diregenerate.</p>
+          </div>
+          <div class="ai2-history-controls" aria-label="Jumlah histori">
+            <button type="button" data-history-limit="10" class="active">10</button>
+            <button type="button" data-history-limit="25">25</button>
+            <button type="button" data-history-limit="50">50</button>
+            <button type="button" data-history-limit="all">ALL</button>
+          </div>
+        </div>
+        <div class="ai2-history-proof"><span>LOCKED BEFORE RESULT ✅</span><span>Forward-only evidence</span><span>No hindsight regeneration</span></div>
+
+        <div class="ai2-history-group">
+          <div class="ai2-history-title"><strong>3D UTAMA · 3 ANGKA</strong><span>Result asli vs Legacy / DigitBoost / Hybrid / Two-Stage / 3D Assist</span></div>
+          <div class="ai2-table-wrap"><table class="ai2-table ai2-history-table ai2-3d-table">
+            <thead><tr><th>Actual Result</th><th>Locked At</th><th>Legacy</th><th>DigitBoost</th><th>Hybrid</th><th>Two-Stage</th><th>3D Assist</th></tr></thead>
+            <tbody id="ai2Utama3dHistory"><tr><td colspan="7">Belum ada settled history.</td></tr></tbody>
+          </table></div>
+        </div>
+
+        <div class="ai2-history-group">
+          <div class="ai2-history-title"><strong>3D UTAMA · KEEP7</strong><span>Result asli vs 7 digit yang benar-benar dikunci sebelum result</span></div>
+          <div class="ai2-table-wrap"><table class="ai2-table ai2-history-table ai2-keeper-table">
+            <thead><tr><th>Actual Result</th><th>Locked At</th><th>KEEP7</th><th>DROP3</th><th>Coverage</th><th>Verdict</th></tr></thead>
+            <tbody id="ai2UtamaKeeperHistory"><tr><td colspan="6">Belum ada settled history.</td></tr></tbody>
+          </table></div>
+        </div>
+
+        <div class="ai2-history-group">
+          <div class="ai2-history-title"><strong>EUROPE · 3 ANGKA</strong><span>First Place actual vs lock 3D Europe sebelum draw</span></div>
+          <div class="ai2-table-wrap"><table class="ai2-table ai2-history-table ai2-3d-table">
+            <thead><tr><th>Actual Result</th><th>Locked At</th><th>Legacy</th><th>DigitBoost</th><th>Hybrid</th><th>Two-Stage</th><th>3D Assist</th></tr></thead>
+            <tbody id="ai2Europe3dHistory"><tr><td colspan="7">Belum ada settled history.</td></tr></tbody>
+          </table></div>
+        </div>
+
+        <div class="ai2-history-group">
+          <div class="ai2-history-title"><strong>EUROPE · KEEP7</strong><span>First Place actual vs KEEP7/DROP3 Europe yang terkunci</span></div>
+          <div class="ai2-table-wrap"><table class="ai2-table ai2-history-table ai2-keeper-table">
+            <thead><tr><th>Actual Result</th><th>Locked At</th><th>KEEP7</th><th>DROP3</th><th>Coverage</th><th>Verdict</th></tr></thead>
+            <tbody id="ai2EuropeKeeperHistory"><tr><td colspan="6">Belum ada settled history.</td></tr></tbody>
+          </table></div>
+        </div>
+      </section>
+
       <section class="ai2-section">
         <div class="ai2-section-head">
           <div><h2>Phase 0 capture contract</h2><p id="ai2Started">Menunggu observer start…</p></div>
@@ -107,7 +158,7 @@ function ai2CreateShell() {
 
       <section class="ai2-section">
         <div class="ai2-section-head">
-          <div><h2>Forward observation log</h2><p>Timeline ini adalah bahan mentah calon AI V2. "Pending" berarti result target belum ditempel.</p></div>
+          <div><h2>Forward observation log</h2><p>Timeline mentah observer. Pending berarti result target belum ditempel; histori di atas hanya memakai row yang sudah settled.</p></div>
         </div>
         <div class="ai2-table-wrap">
           <table class="ai2-table">
@@ -131,6 +182,9 @@ function ai2CreateShell() {
     node.addEventListener("click", () => ai2Switch(false, { preserveTabs: true }));
   });
   workspace.querySelector("#ai2SyncBtn")?.addEventListener("click", () => ai2Sync(true));
+  workspace.querySelectorAll("[data-history-limit]").forEach((node) => {
+    node.addEventListener("click", () => ai2SetHistoryLimit(node.dataset.historyLimit));
+  });
   return true;
 }
 
@@ -147,7 +201,7 @@ function ai2Switch(active, options = {}) {
     document.querySelectorAll("#marketTabs .market-tab").forEach((node) => node.classList.toggle("active", node.dataset.market === "ai-v2"));
     document.body.classList.add("ai2-active");
     try { localStorage.setItem(AI2_ACTIVE_KEY, "1"); } catch {}
-    ai2Sync(false);
+    ai2LoadAll();
   } else {
     document.body.classList.remove("ai2-active");
     try { localStorage.removeItem(AI2_ACTIVE_KEY); } catch {}
@@ -219,14 +273,124 @@ function ai2Render(data) {
   ai2SetText("#ai2Updated", `Update ${new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · V${AI2_UI_VERSION}`);
 }
 
-async function ai2Load() {
+function ai2ScoreLabel(score) {
+  if (!score) return { text: "PENDING", cls: "pending" };
+  if (score.exactTop3) return { text: "EXACT", cls: "exact" };
+  const parts = [];
+  if (score.top10Hit) parts.push("TOP10");
+  if (score.permutationHit) parts.push("PERM");
+  if (Number(score.bestDigitOverlap || 0) > 0) parts.push(`${score.bestDigitOverlap}D`);
+  if (Number(score.bestPositionHits || 0) > 0) parts.push(`${score.bestPositionHits}P`);
+  return parts.length ? { text: parts.join(" · "), cls: "partial" } : { text: "MISS", cls: "miss" };
+}
+
+function ai2ModelById(row, id) {
+  const models = row?.predictionHistory?.models || [];
+  return models.find((model) => String(model.id || "").toLowerCase() === id) || null;
+}
+
+function ai2PredictionCell(model) {
+  if (!model) return '<span class="ai2-empty">—</span>';
+  const top3 = Array.isArray(model.top3) ? model.top3 : [];
+  const score = ai2ScoreLabel(model.score);
+  return `<div class="ai2-prediction-cell"><b>${ai2Esc(top3.join(" · ") || "—")}</b><small class="ai2-score ${score.cls}">${ai2Esc(score.text)}</small></div>`;
+}
+
+function ai2ActualCell(row) {
+  return `<div class="ai2-actual-cell"><strong>${ai2Esc(row.actualResult || "---")}</strong><small>Period ${ai2Esc(row.actualPeriod ?? row.targetPeriod ?? "—")}</small></div>`;
+}
+
+function ai2LockCell(row) {
+  return `<div class="ai2-lock-cell"><b>${ai2Esc(ai2Time(row.lockedAt))}</b><small>LOCKED BEFORE RESULT ${row.lockProof?.lockedBeforeResult ? "✅" : "⚠️"}</small></div>`;
+}
+
+function ai2HistoryRows(source) {
+  const rows = ai2HistoryData[source] || [];
+  if (ai2HistoryLimit === "all") return rows;
+  return rows.slice(0, Math.max(1, Number(ai2HistoryLimit) || 10));
+}
+
+function ai2Render3dHistory(source, selector) {
+  const body = document.querySelector(selector);
+  if (!body) return;
+  const rows = ai2HistoryRows(source);
+  body.innerHTML = rows.length ? rows.map((row) => {
+    const legacy = ai2ModelById(row, "legacy");
+    const digit = ai2ModelById(row, "digitboost");
+    const hybrid = ai2ModelById(row, "hybrid");
+    const twoStage = row.predictionHistory?.twoStage || ai2ModelById(row, "two-stage");
+    const assist = row.predictionHistory?.assist || null;
+    return `<tr>
+      <td>${ai2ActualCell(row)}</td>
+      <td>${ai2LockCell(row)}</td>
+      <td>${ai2PredictionCell(legacy)}</td>
+      <td>${ai2PredictionCell(digit)}</td>
+      <td>${ai2PredictionCell(hybrid)}</td>
+      <td>${ai2PredictionCell(twoStage)}</td>
+      <td>${ai2PredictionCell(assist)}</td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="7">Belum ada settled history dari lock Phase 0.</td></tr>';
+}
+
+function ai2RenderKeeperHistory(source, selector) {
+  const body = document.querySelector(selector);
+  if (!body) return;
+  const rows = ai2HistoryRows(source);
+  body.innerHTML = rows.length ? rows.map((row) => {
+    const keeper = row.predictionHistory?.keeper7 || {};
+    const score = keeper.score || {};
+    const covered = score.covered == null ? "—" : `${score.covered}/3`;
+    const verdict = score.all3 ? { text: "ALL3", cls: "exact" } : score.covered == null ? { text: "—", cls: "pending" } : { text: covered, cls: Number(score.covered) >= 2 ? "partial" : "miss" };
+    return `<tr>
+      <td>${ai2ActualCell(row)}</td>
+      <td>${ai2LockCell(row)}</td>
+      <td><div class="ai2-digit-list">${(keeper.keep7 || []).map((d) => `<span>${ai2Esc(d)}</span>`).join("") || "—"}</div></td>
+      <td><div class="ai2-digit-list drop">${(keeper.drop3 || []).map((d) => `<span>${ai2Esc(d)}</span>`).join("") || "—"}</div></td>
+      <td><b>${ai2Esc(covered)}</b></td>
+      <td><span class="ai2-score ${verdict.cls}">${ai2Esc(verdict.text)}</span></td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="6">Belum ada settled history dari lock Phase 0.</td></tr>';
+}
+
+function ai2RenderHistory(data) {
+  ai2HistoryData = {
+    utama: Array.isArray(data?.bySource?.utama) ? data.bySource.utama : [],
+    europe: Array.isArray(data?.bySource?.europe) ? data.bySource.europe : [],
+  };
+  ai2Render3dHistory("utama", "#ai2Utama3dHistory");
+  ai2RenderKeeperHistory("utama", "#ai2UtamaKeeperHistory");
+  ai2Render3dHistory("europe", "#ai2Europe3dHistory");
+  ai2RenderKeeperHistory("europe", "#ai2EuropeKeeperHistory");
+}
+
+function ai2SetHistoryLimit(value) {
+  ai2HistoryLimit = ["10", "25", "50", "all"].includes(String(value)) ? String(value) : "10";
+  try { localStorage.setItem(AI2_HISTORY_LIMIT_KEY, ai2HistoryLimit); } catch {}
+  document.querySelectorAll("[data-history-limit]").forEach((node) => node.classList.toggle("active", node.dataset.historyLimit === ai2HistoryLimit));
+  ai2RenderHistory({ bySource: ai2HistoryData });
+}
+
+async function ai2LoadStatus() {
+  const response = await ai2Fetch("/api/ai-v2", { headers: { accept: "application/json" }, cache: "no-store" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.error || `AI V2 status gagal (${response.status})`);
+  ai2Render(data);
+  return data;
+}
+
+async function ai2LoadHistory() {
+  const response = await ai2Fetch("/api/ai-v2-history?limit=all", { headers: { accept: "application/json" }, cache: "no-store" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.error || `AI V2 history gagal (${response.status})`);
+  ai2RenderHistory(data);
+  return data;
+}
+
+async function ai2LoadAll() {
   try {
-    const response = await ai2Fetch("/api/ai-v2", { headers: { accept: "application/json" }, cache: "no-store" });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.ok) throw new Error(data.error || `AI V2 status gagal (${response.status})`);
-    ai2Render(data);
+    await Promise.all([ai2LoadStatus(), ai2LoadHistory()]);
   } catch (error) {
-    ai2SetText("#ai2StatusText", error?.message || "AI V2 status tidak dapat dibaca.");
+    ai2SetText("#ai2StatusText", error?.message || "AI V2 status/history tidak dapat dibaca.");
   }
 }
 
@@ -246,9 +410,10 @@ async function ai2Sync(userTriggered) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.ok) throw new Error(data.error || `AI V2 sync gagal (${response.status})`);
     ai2Render(data);
+    await ai2LoadHistory();
   } catch (error) {
     ai2SetText("#ai2StatusText", error?.message || "AI V2 sync gagal.");
-    if (!userTriggered) await ai2Load();
+    if (!userTriggered) await ai2LoadAll();
   } finally {
     if (button) button.disabled = false;
     ai2Syncing = false;
@@ -259,7 +424,7 @@ function ai2StartTimer() {
   clearInterval(ai2Timer);
   ai2Timer = setInterval(() => {
     const workspace = document.querySelector("#aiV2Workspace");
-    if (!document.hidden && workspace && !workspace.hidden) ai2Load();
+    if (!document.hidden && workspace && !workspace.hidden) ai2LoadAll();
   }, 30_000);
 }
 
@@ -268,6 +433,11 @@ function ai2Init() {
     setTimeout(ai2Init, 50);
     return;
   }
+  try {
+    const stored = localStorage.getItem(AI2_HISTORY_LIMIT_KEY);
+    if (["10", "25", "50", "all"].includes(stored)) ai2HistoryLimit = stored;
+  } catch {}
+  ai2SetHistoryLimit(ai2HistoryLimit);
   ai2StartTimer();
   let active = false;
   try { active = localStorage.getItem(AI2_ACTIVE_KEY) === "1"; } catch {}
