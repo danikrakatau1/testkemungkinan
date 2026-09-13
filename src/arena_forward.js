@@ -13,6 +13,11 @@ function parseJson(value, fallback) {
   try { return JSON.parse(value ?? ""); } catch { return fallback; }
 }
 
+function predictionNumber(row) {
+  if (typeof row === "string" || typeof row === "number") return normalizeNumber(row);
+  return normalizeNumber(row?.number);
+}
+
 function digitCounts(value) {
   const counts = Array(10).fill(0);
   for (const char of String(value || "")) {
@@ -49,8 +54,8 @@ function poolCoverage(top3, actual) {
 }
 
 function scoreModel(model, actual) {
-  const top3 = (model.top3 || []).map((row) => row.number);
-  const top10 = (model.top10 || []).map((row) => row.number);
+  const top3 = (model.top3 || []).map(predictionNumber).filter(Boolean).slice(0, 3);
+  const top10 = (model.top10 || []).map(predictionNumber).filter(Boolean).slice(0, 10);
   const candidates = top3.map((candidate) => ({
     candidate,
     exact: candidate === actual,
@@ -61,7 +66,8 @@ function scoreModel(model, actual) {
     Number(b.exact) - Number(a.exact) ||
     Number(b.permutation) - Number(a.permutation) ||
     b.digitOverlap - a.digitOverlap ||
-    b.positionHits - a.positionHits
+    b.positionHits - a.positionHits ||
+    a.candidate.localeCompare(b.candidate)
   ));
   const best = candidates[0] || { candidate: null, digitOverlap: 0, positionHits: 0 };
   return {
@@ -202,12 +208,29 @@ async function settleRow(db, row) {
   return updated.results?.[0] || row;
 }
 
+async function repairSettledRow(db, row) {
+  if (!row || row.status !== "settled") return row;
+  const actual = normalizeNumber(row.actual_result);
+  if (!actual) return row;
+  const predictions = parseJson(row.predictions_json, []);
+  if (!predictions.length) return row;
+  const repairedScores = predictions.map((model) => scoreModel(model, actual));
+  const nextJson = JSON.stringify(repairedScores);
+  const currentJson = String(row.scores_json || "");
+  if (currentJson === nextJson) return row;
+  await db.prepare("UPDATE arena_forward_runs SET scores_json = ? WHERE id = ?").bind(nextJson, Number(row.id)).run();
+  return { ...row, scores_json: nextJson };
+}
+
 export async function listArenaForward(db, limit = 30) {
   if (!db) throw new Error("D1 binding DB belum dikonfigurasi.");
   await ensureArenaForwardSchema(db);
   const safeLimit = Math.min(100, Math.max(1, Number(limit) || 30));
-  let query = await db.prepare("SELECT * FROM arena_forward_runs ORDER BY id DESC LIMIT ?").bind(safeLimit).all();
+  const query = await db.prepare("SELECT * FROM arena_forward_runs ORDER BY id DESC LIMIT ?").bind(safeLimit).all();
   const rows = [];
-  for (const row of query.results || []) rows.push(await settleRow(db, row));
+  for (const row of query.results || []) {
+    const settled = await settleRow(db, row);
+    rows.push(await repairSettledRow(db, settled));
+  }
   return rows.map(mapRow);
 }
