@@ -47,10 +47,15 @@ async function upgradedHealth(request, env, ctx) {
   };
   data.performance = {
     ...(data.performance || {}),
-    visualMode: "SAFE",
+    visualMode: "SAFE · Premium Clean",
     keeper7Endpoint: "separate from core /api/autopilot",
     scheduledOrder: "collector/core locks -> Two-Stage lock -> Keeper7 lock",
-    note: "V0.9.1 keeps heavy visual layers disabled and computes Keeper7 independently so the dashboard stays responsive."
+    premiumClean: {
+      enabled: true,
+      heavyWebGL: false,
+      structure: "single dashboard surface, flat result/model hero, flat Keeper7, analytical Two-Stage strip, merged forward footer"
+    },
+    note: "V0.9.1 keeps heavy visual layers disabled; premium-clean is CSS/DOM-only and preserves responsive SAFE MODE."
   };
   data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/keeper7"]));
   data.now = new Date().toISOString();
@@ -65,10 +70,21 @@ async function injectV091(request, response) {
   if (!contentType.includes("text/html")) return response;
 
   let html = await response.text();
+
+  if (!html.includes("/v091-premium.css")) {
+    html = html.replace("</head>", '  <link rel="stylesheet" href="/v091-premium.css">\n</head>');
+  }
+
   if (!html.includes("/v091.js")) {
     const marker = '<script type="module" src="/v090.js"></script>';
     if (html.includes(marker)) html = html.replace(marker, `${marker}\n  <script type="module" src="/v091.js"></script>`);
     else html = html.replace("</body>", '  <script type="module" src="/v091.js"></script>\n</body>');
+  }
+
+  if (!html.includes("/v091-premium.js")) {
+    const marker = '<script type="module" src="/v091.js"></script>';
+    if (html.includes(marker)) html = html.replace(marker, `${marker}\n  <script type="module" src="/v091-premium.js"></script>`);
+    else html = html.replace("</body>", '  <script type="module" src="/v091-premium.js"></script>\n</body>');
   }
 
   const headers = new Headers(response.headers);
