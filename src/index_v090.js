@@ -45,11 +45,22 @@ async function upgradedHealth(request, env, ctx) {
   data.performance = {
     autopilotStatus: "fast-path",
     twoStage: "separate endpoint",
-    note: "Core /api/autopilot no longer waits for Two-Stage computation."
+    visualMode: "SAFE",
+    disabledScripts: ["v082.js", "v082-bgfix.js", "v083.js", "v083-perf.js"],
+    note: "Emergency production safe mode disables animated visual layers to guarantee dashboard responsiveness."
   };
   data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/two-stage"]));
   data.now = new Date().toISOString();
   return json(data, response.status);
+}
+
+function stripFreezeRiskScripts(html) {
+  return html
+    .replace(/\s*<script[^>]+src=["']\/v082\.js["'][^>]*><\/script>/gi, "")
+    .replace(/\s*<script[^>]+src=["']\/v082-bgfix\.js["'][^>]*><\/script>/gi, "")
+    .replace(/\s*<script[^>]+src=["']\/v083\.js["'][^>]*><\/script>/gi, "")
+    .replace(/\s*<script[^>]+src=["']\/v083-perf\.js["'][^>]*><\/script>/gi, "")
+    .replace(/\s*<script[^>]+src=["']\/v090\.js["'][^>]*><\/script>/gi, "");
 }
 
 async function injectV090(request, response) {
@@ -59,16 +70,26 @@ async function injectV090(request, response) {
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("text/html")) return response;
 
-  let html = await response.text();
-  if (!html.includes("/v090.js")) {
-    const marker = '<script type="module" src="/v083.js"></script>';
-    if (html.includes(marker)) html = html.replace(marker, `${marker}\n  <script type="module" src="/v090.js"></script>`);
-    else html = html.replace("</body>", '  <script type="module" src="/v090.js"></script>\n</body>');
-  }
+  let html = stripFreezeRiskScripts(await response.text());
+
+  const safeStyle = `<style id="v090SafeModeStyle">
+    html,body{min-height:100%;background:#040813!important}
+    body{background:
+      radial-gradient(900px 560px at 12% -8%,rgba(37,99,235,.18),transparent 64%),
+      radial-gradient(760px 520px at 92% 2%,rgba(124,58,237,.14),transparent 66%),
+      linear-gradient(180deg,#08101f 0%,#050914 48%,#030711 100%)!important}
+    .autopilot-panel{background:linear-gradient(155deg,rgba(10,18,34,.91),rgba(5,11,23,.88))!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+    .topbar .status::after{content:" · SAFE";opacity:.72}
+  </style>`;
+
+  if (!html.includes("v090SafeModeStyle")) html = html.replace("</head>", `${safeStyle}\n</head>`);
+  html = html.replace("</body>", '  <script type="module" src="/v090.js"></script>\n</body>');
 
   const headers = new Headers(response.headers);
   headers.delete("content-length");
-  headers.set("cache-control", "no-store");
+  headers.set("cache-control", "no-store, no-cache, must-revalidate");
+  headers.set("pragma", "no-cache");
+  headers.set("expires", "0");
   return new Response(html, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -76,8 +97,6 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/api/two-stage") return handleTwoStage(request, env);
-    // Keep the core dashboard responsive: let the existing AutoPilot endpoint return immediately.
-    // V0.9.0 loads its challenger independently from /api/two-stage.
     if (url.pathname === "/api/autopilot") return baseWorker.fetch(request, env, ctx);
     if (url.pathname === "/api/health") return upgradedHealth(request, env, ctx);
 
