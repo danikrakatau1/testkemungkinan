@@ -4,11 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#060913" />
-  <meta name="description" content="Dashboard eksperimen statistik 3 digit: live collector, multi-model ranking, baseline random, holdout validation, Top 10, Top 3, dan rolling backtest tanpa future leak." />
-  <title>Test Kemungkinan 3D · V0.5</title>
+  <meta name="description" content="Dashboard eksperimen statistik 3 digit: live collector, multi-model ranking, baseline random, locked holdout, multi-window validation, Top 10, Top 3, dan rolling backtest tanpa future leak." />
+  <title>Test Kemungkinan 3D · V0.6</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/v04.css" />
   <link rel="stylesheet" href="/v05.css" />
+  <link rel="stylesheet" href="/v06.css" />
 </head>
 <body>
   <div class="shell">
@@ -17,7 +18,7 @@
         <div class="brand-mark">3D</div>
         <div class="brand-text">Test Kemungkinan</div>
       </div>
-      <div class="status"><span class="status-dot"></span> V0.5 · Validation hardened</div>
+      <div class="status"><span class="status-dot"></span> V0.6 · Multi-Window Validation</div>
     </header>
 
     <main>
@@ -25,8 +26,8 @@
         <article class="hero-copy">
           <p class="eyebrow">Statistical Ranking Lab</p>
           <h1>Analyzer 3 Digit.</h1>
-          <p class="lead">Collector menyimpan histori ke D1. Model dibandingkan pada rolling backtest, lalu V0.5 menambahkan baseline random, calibration window, locked holdout terbaru, dan validation gate sebelum weighted ensemble boleh dipromosikan.</p>
-          <div class="warning"><span>◇</span><span>Skor kandidat, confidence, dan leaderboard adalah <strong>ukuran evidence historis, bukan probabilitas kemenangan</strong>. Jika sumber hasil benar-benar acak, pola historis tidak menjamin hasil berikutnya.</span></div>
+          <p class="lead">Collector menyimpan histori ke D1. Model dibandingkan pada rolling backtest, calibration + locked holdout, lalu V0.6 menjalankan beberapa validation window secara berurutan agar histori ratusan draw bisa diuji tanpa menabrak CPU Worker.</p>
+          <div class="warning"><span>◇</span><span>Skor kandidat, confidence, leaderboard, dan multi-window gate adalah <strong>ukuran evidence historis, bukan probabilitas kemenangan</strong>. Jika sumber hasil benar-benar acak, pola historis tidak menjamin hasil berikutnya.</span></div>
         </article>
 
         <aside class="panel quick-panel">
@@ -51,7 +52,7 @@
             <span class="small-badge">000–999</span>
           </div>
 
-          <div class="warning" id="collectorStatus"><span>◎</span><span><strong>Collector + D1 siap.</strong> Sync dapat mengambil hingga 20 halaman terbaru lalu menggabungkannya dengan histori permanen.</span></div>
+          <div class="warning" id="collectorStatus"><span>◎</span><span><strong>Collector + D1 siap.</strong> Sync mengambil data terbaru dan menambah histori lama secara incremental.</span></div>
           <div class="input-actions">
             <button class="text-btn" id="liveBtn" type="button">Ambil Live 30</button>
             <button class="text-btn" id="syncBtn" type="button">Sync Collector</button>
@@ -93,6 +94,7 @@
             <button class="btn btn-secondary" id="backtestBtn" type="button">Run Backtest</button>
             <button class="btn btn-lab" id="labBtn" type="button">Compare Models</button>
             <button class="btn btn-validation" id="validateBtn" type="button">Run Validation</button>
+            <button class="btn btn-multi" id="multiValidateBtn" type="button">Run Multi-Window</button>
           </div>
           <div class="error" id="errorBox" role="alert"></div>
         </aside>
@@ -133,7 +135,7 @@
             <div class="panel-title-row">
               <div>
                 <h2>Model Lab Leaderboard</h2>
-                <p class="panel-subtitle">Semua model diuji pada target historis yang sama. V0.5 juga menilai apakah performanya benar-benar lebih baik daripada baseline random.</p>
+                <p class="panel-subtitle">Semua model diuji pada target historis yang sama dan dibandingkan dengan baseline random.</p>
               </div>
               <span class="small-badge">5 models</span>
             </div>
@@ -152,9 +154,9 @@
             <div class="panel-title-row">
               <div>
                 <h2>Validation Gate</h2>
-                <p class="panel-subtitle">Bobot model dituning hanya pada calibration window yang lebih lama. Target terbaru dikunci sebagai holdout dan tidak ikut tuning.</p>
+                <p class="panel-subtitle">Single-window CPU-safe gate: 20 calibration target + 10 locked holdout target terbaru.</p>
               </div>
-              <span class="small-badge">V0.5</span>
+              <span class="small-badge">V0.5.4 engine</span>
             </div>
             <div class="backtest-empty" id="validationEmpty">Klik <strong>Run Validation</strong>. Weighted ensemble tetap terkunci sampai calibration + holdout melewati gate konservatif vs random.</div>
             <div class="validation-gate" id="validationGate"></div>
@@ -172,6 +174,41 @@
                 <div class="validation-card-title">Weighted current Top 3</div>
                 <div id="validationTop3" class="validation-top3 mono">---</div>
                 <p class="validation-note">Jika gate masih LOCKED, ranking weighted ini hanya eksperimen dan tidak menggantikan Top 3 utama.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel multi-window-panel">
+            <div class="panel-title-row">
+              <div>
+                <h2>Multi-Window Walk-Forward</h2>
+                <p class="panel-subtitle">V0.6 menjalankan sampai 5 window berurutan. Setiap window memproses 20 calibration + 10 locked holdout tanpa overlap target, lalu hasil holdout digabung.</p>
+              </div>
+              <span class="small-badge">V0.6</span>
+            </div>
+            <div class="backtest-empty" id="multiWindowEmpty">Klik <strong>Run Multi-Window</strong>. Dengan 300 draw, default-nya 5 window = 150 evaluated target dan 50 locked out-of-sample target.</div>
+            <div class="multi-progress" id="multiWindowProgress"><span></span></div>
+            <div class="validation-gate" id="multiWindowGate"></div>
+            <div class="validation-metrics" id="multiWindowMetrics"></div>
+            <div class="table-wrap model-table-wrap" style="margin-top:14px">
+              <table class="model-table multi-window-table">
+                <thead><tr><th>Window</th><th>Target offset</th><th>Holdout</th><th>Top 10</th><th>Mean rank</th><th>Δ random</th><th>Gate</th><th>Weighted Top 3 snapshot</th></tr></thead>
+                <tbody id="multiWindowBody"></tbody>
+              </table>
+            </div>
+            <div class="validation-grid" style="margin-top:14px">
+              <div class="validation-card">
+                <div class="validation-card-title">Average calibration weights</div>
+                <div id="multiWindowWeights"></div>
+              </div>
+              <div class="validation-card">
+                <div class="validation-card-title">Aggregate holdout comparison</div>
+                <div id="multiWindowComparison"></div>
+              </div>
+              <div class="validation-card">
+                <div class="validation-card-title">Top 3 stability across snapshots</div>
+                <div id="multiWindowStability"></div>
+                <p class="validation-note">Stability berarti sering muncul pada snapshot window, bukan probabilitas hasil berikutnya.</p>
               </div>
             </div>
           </section>
@@ -210,10 +247,11 @@
 
     <footer>
       <span>Standalone project · danikrakatau1/testkemungkinan</span>
-      <span>V0.5 · baseline evidence + calibration + locked holdout validation</span>
+      <span>V0.6 · sequential multi-window walk-forward validation</span>
     </footer>
   </div>
 
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/v06.js"></script>
 </body>
 </html>
