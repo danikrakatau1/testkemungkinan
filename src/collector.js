@@ -122,6 +122,23 @@ export async function fetchRecentResults(options = {}) {
   };
 }
 
+export async function ensureSchema(db) {
+  if (!db) return false;
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS results_3d (
+      period INTEGER PRIMARY KEY,
+      result TEXT NOT NULL CHECK (length(result) = 3),
+      draw_date TEXT,
+      draw_time TEXT,
+      source_url TEXT NOT NULL,
+      collected_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_results_3d_period_desc ON results_3d(period DESC);
+    CREATE INDEX IF NOT EXISTS idx_results_3d_collected_at ON results_3d(collected_at);
+  `);
+  return true;
+}
+
 export async function persistResults(db, results = []) {
   if (!db) {
     return {
@@ -131,10 +148,13 @@ export async function persistResults(db, results = []) {
     };
   }
 
+  await ensureSchema(db);
+
   if (!Array.isArray(results) || results.length === 0) {
     return { configured: true, inserted: 0 };
   }
 
+  const collectedAt = new Date().toISOString();
   const statements = results.map((row) => db.prepare(`
     INSERT OR IGNORE INTO results_3d
       (period, result, draw_date, draw_time, source_url, collected_at)
@@ -145,7 +165,7 @@ export async function persistResults(db, results = []) {
     row.drawDate,
     row.drawTime,
     row.sourceUrl,
-    new Date().toISOString(),
+    collectedAt,
   ));
 
   const responses = await db.batch(statements);
@@ -158,6 +178,7 @@ export async function readStoredResults(db, limit = 500) {
     throw new Error("D1 binding DB belum dikonfigurasi.");
   }
 
+  await ensureSchema(db);
   const safeLimit = clampInt(limit, 500, 1, 5000);
   const query = await db.prepare(`
     SELECT period, result, draw_date AS drawDate, draw_time AS drawTime,
