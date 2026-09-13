@@ -6,6 +6,7 @@ import {
 } from "./analyzer.js";
 import { validateWeightedEnsemble } from "./validation.js";
 import { validateWalkForwardWindow } from "./validation_window.js";
+import { validateWalkForwardWindowReference } from "./validation_window_reference.js";
 import {
   backfillOlderResults,
   collectAndPersist,
@@ -82,6 +83,15 @@ async function handleValidationWindow(request) {
     return json({ ok: true, ...validateWalkForwardWindow(body?.history, analysisOptions(body)) });
   } catch (error) {
     return json({ ok: false, error: error?.message || "Walk-forward window gagal." }, 400);
+  }
+}
+
+async function handleValidationWindowReference(request) {
+  try {
+    const body = await readJson(request);
+    return json({ ok: true, ...validateWalkForwardWindowReference(body?.history, analysisOptions(body)) });
+  } catch (error) {
+    return json({ ok: false, error: error?.message || "Reference walk-forward window gagal." }, 400);
   }
 }
 
@@ -168,10 +178,10 @@ export default {
       return json({
         ok: true,
         service: "testkemungkinan",
-        version: "0.6.3",
+        version: "0.6.4",
         storageConfigured: Boolean(env?.DB),
         models: listModels(),
-        validation: "V0.5.4 single-window + optimized V0.6.3 walk-forward + V0.6.2 regime/stability diagnostics",
+        validation: "V0.5.4 single-window + V0.6.3 production walk-forward + V0.6.2 regime diagnostics + V0.6.4 frozen parity reference",
         multiWindowValidation: {
           defaultWindows: 8,
           targetsPerWindow: 18,
@@ -179,8 +189,13 @@ export default {
           lockedHoldoutPerWindow: 6,
           defaultAggregateHoldoutTargets: 48,
           trainingDrawsPerTarget: 80,
-          requestStrategy: "sequential browser requests to optimized /api/validate-window with retry/backoff",
-          optimization: "shared feature build across four models + O(1) repeat lookup",
+          requestStrategy: "sequential browser requests to /api/validate-window with retry/backoff",
+        },
+        parityAudit: {
+          productionEndpoint: "/api/validate-window",
+          referenceEndpoint: "/api/validate-window-reference",
+          rule: "same frozen history slice + same options must produce identical weights, holdout ranks, summary, gate, and current Top3",
+          purpose: "detect math drift before any optimization is trusted",
         },
         regimeAnalysis: {
           requestCost: "none beyond multi-window run",
@@ -200,6 +215,7 @@ export default {
           "/api/leaderboard",
           "/api/validate",
           "/api/validate-window",
+          "/api/validate-window-reference",
           "/api/source?pages=5",
           "/api/collect",
           "/api/backfill",
@@ -211,7 +227,7 @@ export default {
 
     if (url.pathname === "/api/models") {
       if (request.method !== "GET") return json({ ok: false, error: "Gunakan GET." }, 405);
-      return json({ ok: true, version: "0.6.3", models: listModels() });
+      return json({ ok: true, version: "0.6.4", models: listModels() });
     }
 
     if (url.pathname === "/api/analyze") {
@@ -237,6 +253,11 @@ export default {
     if (url.pathname === "/api/validate-window") {
       if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST." }, 405);
       return handleValidationWindow(request);
+    }
+
+    if (url.pathname === "/api/validate-window-reference") {
+      if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST." }, 405);
+      return handleValidationWindowReference(request);
     }
 
     if (url.pathname === "/api/source") {
