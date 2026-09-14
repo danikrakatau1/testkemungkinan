@@ -1,5 +1,5 @@
 name = "testkemungkinan"
-main = "src/index_v094.js"
+main = "src/index_v095.js"
 compatibility_date = "2026-09-13"
 
 [assets]
