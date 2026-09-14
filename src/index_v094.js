@@ -1,4 +1,7 @@
 import baseWorker from "./index_v093.js";
+import { runAutoPilot } from "./autopilot.js";
+import { runTwoStagePilot } from "./two_stage_forward.js";
+import { runKeeper7Pilot } from "./keeper7_forward.js";
 import { getAiV2ObserverStatus, runAiV2Observer } from "./ai_v2_observer.js";
 import { getAiV2History } from "./ai_v2_history.js";
 
@@ -49,6 +52,56 @@ async function handleAiV2Sync(request, env) {
   }
 }
 
+async function handleMainSync(request, env) {
+  if (request.method !== "POST") return json({ ok: false, error: "Gunakan POST untuk main auto-sync." }, 405);
+  if (!env?.DB) return json({ ok: false, error: "D1 binding DB diperlukan untuk main auto-sync." }, 503);
+
+  try {
+    // One ordered pipeline for the draw window. Every stage keeps its own
+    // forward-lock/idempotency rules, so repeated source checks are safe.
+    const autopilot = await runAutoPilot(env, { collect: true });
+    const twoStage = await runTwoStagePilot(env);
+    const keeper7 = await runKeeper7Pilot(env);
+    const aiV2 = await runAiV2Observer(env);
+
+    return json({
+      ok: true,
+      version: VERSION,
+      mode: "DRAW_WINDOW_AUTO_SYNC",
+      autopilot: {
+        latest: autopilot.latest || null,
+        draws: autopilot.draws ?? null,
+        pendingArena: autopilot.pendingArena || null,
+        collectionError: autopilot.pipeline?.collectionError || null,
+      },
+      twoStage: {
+        pending: twoStage?.pending || null,
+        last: twoStage?.last || null,
+      },
+      keeper7: {
+        pending: keeper7?.pending || null,
+        last: keeper7?.last || null,
+        forward: keeper7?.forward || null,
+      },
+      aiV2: {
+        counts: aiV2?.counts || null,
+        captures: aiV2?.pipeline?.captures || [],
+        settlement: aiV2?.pipeline?.settlement || null,
+      },
+      policy: {
+        collectLatest: true,
+        settleOldLocksFirst: true,
+        createNewLocksAfterActual: true,
+        aiV2ForwardOnly: true,
+        noHindsightRewrite: true,
+      },
+      now: new Date().toISOString(),
+    });
+  } catch (error) {
+    return json({ ok: false, version: VERSION, error: error?.message || "Main auto-sync gagal." }, 500);
+  }
+}
+
 async function upgradedHealth(request, env, ctx) {
   const response = await baseWorker.fetch(request, env, ctx);
   const data = await response.json().catch(() => ({}));
@@ -72,13 +125,28 @@ async function upgradedHealth(request, env, ctx) {
     observations: aiV2?.counts ?? null,
     gate: aiV2?.gates?.currentGate ?? "COLLECT_FORWARD_EVIDENCE",
   };
+  data.mainAutoSync = {
+    endpoint: "/api/main-sync",
+    mode: "draw-window source check + ordered full main pipeline",
+    browserWindow: "minute 00 through 05 Asia/Jakarta",
+    retrySeconds: 20,
+    serverFallback: "main pipeline also runs on every 5-minute cron tick",
+    stages: ["collect", "settle", "Arena", "Two-Stage", "Keeper7", "AI V2 observer snapshot"],
+  };
   data.performance = {
     ...(data.performance || {}),
     aiV2Ui: "SAFE · CSS/DOM only · no WebGL",
     aiV2Mode: "observer only · zero prediction authority",
     aiV2History: "actual result and original locked prediction are displayed separately",
+    mainAutoSync: "lightweight draw-window polling; no WebGL and no page reload",
   };
-  data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/ai-v2", "/api/ai-v2-history", "/api/ai-v2-sync"]));
+  data.endpoints = Array.from(new Set([
+    ...(data.endpoints || []),
+    "/api/ai-v2",
+    "/api/ai-v2-history",
+    "/api/ai-v2-sync",
+    "/api/main-sync",
+  ]));
   data.now = new Date().toISOString();
   return json(data, response.status);
 }
@@ -94,6 +162,7 @@ async function injectV094(request, response) {
   if (!html.includes("/v094-ai-v2.css")) html = html.replace("</head>", '  <link rel="stylesheet" href="/v094-ai-v2.css">\n</head>');
   if (!html.includes("/v094-ai-v2.js")) html = html.replace("</body>", '  <script type="module" src="/v094-ai-v2.js"></script>\n</body>');
   if (!html.includes("/v094-ai-v2-clarity.js")) html = html.replace("</body>", '  <script type="module" src="/v094-ai-v2-clarity.js"></script>\n</body>');
+  if (!html.includes("/v094-autosync.js")) html = html.replace("</body>", '  <script type="module" src="/v094-autosync.js"></script>\n</body>');
 
   const headers = new Headers(response.headers);
   headers.delete("content-length");
@@ -109,6 +178,7 @@ export default {
     if (url.pathname === "/api/ai-v2") return handleAiV2Status(request, env);
     if (url.pathname === "/api/ai-v2-history") return handleAiV2History(request, env);
     if (url.pathname === "/api/ai-v2-sync") return handleAiV2Sync(request, env);
+    if (url.pathname === "/api/main-sync") return handleMainSync(request, env);
     if (url.pathname === "/api/health") return upgradedHealth(request, env, ctx);
 
     const response = await baseWorker.fetch(request, env, ctx);
@@ -116,14 +186,11 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    // V0.9.3 remains authoritative for both existing pipelines. AI V2 only
-    // observes the resulting pending locks and never changes their weights,
-    // predictions, settlement, or source data.
+    // V0.9.3 remains authoritative for the existing UTAMA + EUROPE pipelines.
     baseWorker.scheduled(event, env, ctx);
 
-    // This may race a just-created V1 lock on the same cron tick. That is safe:
-    // Phase 0 refuses settled-history backfill and will capture the pending lock
-    // on the next 5-minute tick or when the AI V2 tab requests SNAPSHOT NOW.
+    // AI V2 remains observer-only. If this races a just-created source lock,
+    // the next cron tick/client draw-window sync captures it while still pending.
     ctx.waitUntil((async () => {
       try {
         await runAiV2Observer(env);
