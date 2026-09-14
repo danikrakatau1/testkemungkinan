@@ -259,9 +259,7 @@ export async function runLabReview(env, options = {}) {
     return { ...status, ran: false, reason: "NO_DUE_REVIEW" };
   }
 
-  const reasons = due.length
-    ? due.map((trigger) => trigger.key)
-    : ["MANUAL_REVIEW"];
+  const reasons = due.length ? due.map((trigger) => trigger.key) : ["MANUAL_REVIEW"];
   const now = new Date().toISOString();
   const errors = [];
   const evidence = status.evidence || await getEvidenceMonitor(env);
@@ -284,16 +282,27 @@ export async function runLabReview(env, options = {}) {
     now,
   });
 
-  const reviewKey = due.length
-    ? reasons.slice().sort().join("+")
-    : `MANUAL_${now.replace(/[:.]/g, "-")}`;
+  const reviewKey = due.length ? reasons.slice().sort().join("+") : `MANUAL_${now.replace(/[:.]/g, "-")}`;
 
   await db.prepare(`
-    INSERT OR IGNORE INTO lab_review_reports(
+    INSERT INTO lab_review_reports(
       review_key, created_at, phase_started_at, elapsed_hours, reasons_json,
       decision, simulations, summary_json, evidence_json, edge_json,
       forensics_json, monte_carlo_json, errors_json
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(review_key) DO UPDATE SET
+      created_at=excluded.created_at,
+      phase_started_at=excluded.phase_started_at,
+      elapsed_hours=excluded.elapsed_hours,
+      reasons_json=excluded.reasons_json,
+      decision=excluded.decision,
+      simulations=excluded.simulations,
+      summary_json=excluded.summary_json,
+      evidence_json=excluded.evidence_json,
+      edge_json=excluded.edge_json,
+      forensics_json=excluded.forensics_json,
+      monte_carlo_json=excluded.monte_carlo_json,
+      errors_json=excluded.errors_json
   `).bind(
     reviewKey,
     now,
@@ -312,7 +321,7 @@ export async function runLabReview(env, options = {}) {
 
   const report = await firstRow(db.prepare("SELECT id FROM lab_review_reports WHERE review_key=? LIMIT 1").bind(reviewKey));
   const reportId = report ? Number(report.id) : null;
-  if (due.length && reportId != null) {
+  if (due.length && reportId != null && errors.length === 0) {
     await db.batch(due.map((trigger) => db.prepare(`
       INSERT OR IGNORE INTO lab_review_completed_triggers(trigger_key, completed_at, report_id)
       VALUES(?,?,?)
@@ -334,6 +343,8 @@ export async function runLabReview(env, options = {}) {
       forensics,
       monteCarlo,
       errors,
+      completedTriggers: errors.length === 0 ? due.map((trigger) => trigger.key) : [],
+      retryRequired: due.length > 0 && errors.length > 0,
     },
   };
 }
