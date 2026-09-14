@@ -189,5 +189,92 @@ function initMainAutoSync() {
   });
 }
 
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initMainAutoSync, { once: true });
-else initMainAutoSync();
+// Europe 45-minute draw-window auto-sync. V0.9.3 intentionally clamps the
+// countdown at 00:00:00; this layer turns that state into an automatic source
+// check instead of requiring the user to press SYNC NOW.
+const EUROPE_AUTOSYNC_VERSION = "0.9.4-europe-draw-window";
+const EUROPE_AUTOSYNC_RETRY_MS = 20_000;
+const EUROPE_AUTOSYNC_CHECK_MS = 2_000;
+const EUROPE_AUTOSYNC_MAX_WINDOW_MS = 8 * 60_000;
+let europeAutoBaselinePeriod = null;
+let europeAutoFirstZeroAt = 0;
+let europeAutoLastAttempt = 0;
+let europeAutoTimer = null;
+
+function europeWorkspaceActive() {
+  const workspace = document.querySelector("#europeWorkspace");
+  return Boolean(workspace && !workspace.hidden);
+}
+
+function readEuropePeriod() {
+  const meta = String(document.querySelector("#europeLatestMeta")?.textContent || "");
+  const match = meta.match(/Period\s+(\d+)/i);
+  return match ? match[1] : null;
+}
+
+function europeCountdownZero() {
+  return String(document.querySelector("#europeCountdown")?.textContent || "").trim() === "00:00:00";
+}
+
+function resetEuropeAutoWindow() {
+  europeAutoBaselinePeriod = null;
+  europeAutoFirstZeroAt = 0;
+  europeAutoLastAttempt = 0;
+}
+
+function setEuropeAutoStatus(text) {
+  const node = document.querySelector("#europeStatus span");
+  if (node) node.textContent = text;
+}
+
+function europeAutoSyncTick(force = false) {
+  if (!europeWorkspaceActive()) return;
+
+  if (!europeCountdownZero() && !force) {
+    if (europeAutoFirstZeroAt) resetEuropeAutoWindow();
+    return;
+  }
+
+  const now = Date.now();
+  const currentPeriod = readEuropePeriod();
+  if (!europeAutoFirstZeroAt) {
+    europeAutoFirstZeroAt = now;
+    europeAutoBaselinePeriod = currentPeriod;
+  }
+
+  if (europeAutoBaselinePeriod && currentPeriod && currentPeriod !== europeAutoBaselinePeriod) {
+    resetEuropeAutoWindow();
+    return;
+  }
+
+  if (!force && now - europeAutoFirstZeroAt > EUROPE_AUTOSYNC_MAX_WINDOW_MS) {
+    setEuropeAutoStatus("AUTO aktif · source belum berubah; fallback cron 5 menit tetap memantau.");
+    return;
+  }
+
+  if (!force && now - europeAutoLastAttempt < EUROPE_AUTOSYNC_RETRY_MS) return;
+  const button = document.querySelector("#europeSyncBtn");
+  if (!button || button.disabled) return;
+
+  europeAutoLastAttempt = now;
+  setEuropeAutoStatus("AUTO-SYNC Europe · mengecek First Place terbaru…");
+  button.click();
+}
+
+function initEuropeAutoSync() {
+  clearInterval(europeAutoTimer);
+  europeAutoTimer = setInterval(() => europeAutoSyncTick(false), EUROPE_AUTOSYNC_CHECK_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && europeWorkspaceActive() && europeCountdownZero()) europeAutoSyncTick(true);
+  });
+}
+
+function initAllAutoSync() {
+  initMainAutoSync();
+  initEuropeAutoSync();
+}
+
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initAllAutoSync, { once: true });
+else initAllAutoSync();
+
+console.debug(`Auto-sync active: main ${MAIN_AUTOSYNC_VERSION} · Europe ${EUROPE_AUTOSYNC_VERSION}`);
