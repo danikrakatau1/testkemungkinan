@@ -233,7 +233,7 @@ function renderHistory(reports) {
 
 function renderLab(data) {
   labLoaded = true;
-  lastDueAt = data.review24h?.dueAt || null;
+  lastDueAt = data.review24h?.completed ? null : (data.review24h?.dueAt || null);
   updateCountdown();
   const latest = data.latestReport;
   const decision = latest?.decision || (data.dueTriggers?.length ? "EXTEND_COLLECTION" : null);
