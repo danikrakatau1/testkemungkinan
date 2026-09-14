@@ -27,5 +27,5 @@ for (const token of [
 if (!index.includes("/api/lock-recovery")) throw new Error("Recovery endpoint missing");
 if (!index.includes("v101-recovery.js") || !index.includes("v101-recovery.css")) throw new Error("Recovery UI injection missing");
 if (!ui.includes("RECOVERY 🔬") || !ui.includes("NO HINDSIGHT")) throw new Error("Recovery UI guardrail missing");
-if (!wrangler.includes('main = "src/index_v101.js"')) throw new Error("wrangler main is not V1.0.1");
+if (!/main = "src\/index_v10[1-9]\.js"/.test(wrangler)) throw new Error("active worker no longer includes V1.0.1+ recovery lineage");
 console.log("lock-recovery smoke: PASS");
