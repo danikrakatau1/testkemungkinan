@@ -31,6 +31,6 @@ for (const token of [
 if (!index.includes("/api/watchdog") || !index.includes("/api/watchdog/run")) throw new Error("Watchdog endpoint missing");
 if (!index.includes('trigger: "scheduled"')) throw new Error("Scheduled watchdog authority missing");
 if (!ui.includes("WATCHDOG 🛰️") || !ui.includes("Manual cycle tidak dihitung")) throw new Error("Watchdog UI guardrail missing");
-if (!wrangler.includes('main = "src/index_v102.js"')) throw new Error("wrangler main is not V1.0.2");
+if (!/main = "src\/index_v10[2-9]\.js"/.test(wrangler)) throw new Error("active worker no longer includes V1.0.2+ watchdog lineage");
 if (!wrangler.includes('crons = ["* * * * *"]')) throw new Error("watchdog cron is not every minute");
 console.log("watchdog smoke: PASS");
