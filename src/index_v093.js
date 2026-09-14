@@ -60,7 +60,7 @@ async function upgradedHealth(request, env, ctx) {
     ...(data.performance || {}),
     visualMode: "SAFE · Premium Clean",
     europeUi: "CSS/DOM only · no WebGL",
-    mainCronPreserved: "main pipeline still executes on 10-minute boundaries",
+    mainCronFallback: "main pipeline executes on every 5-minute cron tick",
   };
   data.endpoints = Array.from(new Set([...(data.endpoints || []), "/api/europe", "/api/europe-sync"]));
   data.now = new Date().toISOString();
@@ -97,12 +97,10 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    const scheduledAt = Number(event?.scheduledTime || Date.now());
-    const minute = new Date(scheduledAt).getUTCMinutes();
-
-    // Preserve the existing main pipeline's 10-minute rhythm even though the
-    // Worker cron is now 5 minutes for Europe.
-    if (minute % 10 === 0) baseWorker.scheduled(event, env, ctx);
+    // Worker cron is every 5 minutes. Run the main pipeline on every tick as a
+    // server-side fallback, so a result published just after the hour is not
+    // forced to wait for the old 10-minute boundary.
+    baseWorker.scheduled(event, env, ctx);
 
     ctx.waitUntil((async () => {
       try {
