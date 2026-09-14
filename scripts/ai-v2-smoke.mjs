@@ -70,6 +70,11 @@ assert.match(autoSync, /MAIN_AUTOSYNC_WINDOW_MINUTES = 5/);
 assert.match(autoSync, /\/api\/main-sync/);
 assert.match(autoSync, /AUTO-SYNC WAITING SOURCE/);
 assert.match(autoSync, /AUTO-SYNC SYNCED/);
+assert.match(autoSync, /EUROPE_AUTOSYNC_RETRY_MS = 20_000/);
+assert.match(autoSync, /EUROPE_AUTOSYNC_MAX_WINDOW_MS = 8 \* 60_000/);
+assert.match(autoSync, /europeCountdownZero/);
+assert.match(autoSync, /#europeSyncBtn/);
+assert.match(autoSync, /AUTO-SYNC Europe/);
 assert.match(migration, /CREATE TABLE IF NOT EXISTS ai_v2_observations/);
 assert.doesNotMatch(observer, /UPDATE\s+arena_forward_runs/i);
 assert.doesNotMatch(observer, /UPDATE\s+keeper7_forward_runs/i);
@@ -80,4 +85,4 @@ assert.doesNotMatch(history, /UPDATE\s+keeper7_forward_runs/i);
 assert.doesNotMatch(history, /UPDATE\s+two_stage_forward_runs/i);
 assert.doesNotMatch(history, /UPDATE\s+europe_forward_runs/i);
 
-console.log("AI V2 Phase 0 + locked history + main draw-window auto-sync smoke PASS");
+console.log("AI V2 Phase 0 + locked history + main/Europe draw-window auto-sync smoke PASS");
