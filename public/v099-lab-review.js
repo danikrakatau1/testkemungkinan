@@ -211,7 +211,7 @@ function renderSource(selector, name, source) {
   const watches = source?.watchlist || [];
   node.innerHTML = `
     <div class="lab-review-source-head"><div><small>${escL(name)}</small><strong>${escL(gate)}</strong></div><span>${settled} settled · ${pending} pending</span></div>
-    <div class="lab-review-progress"><span style="width:${Math.min(100, Number(progress.pct || 0))}%"></span></div>
+    <div class="lab-review-progress"><span style="width:${Math.min(100, Number(progress.percentToNext || 0))}%"></span></div>
     <div class="lab-review-source-meta"><span>Next ${escL(next)}</span><strong>${escL(remaining)} lagi</strong></div>
     <div class="lab-review-source-watch">${watches.length ? watches.map((w) => `<span>WATCH · ${escL(w.label)}</span>`).join("") : "NO WATCHLIST"}</div>`;
 }
