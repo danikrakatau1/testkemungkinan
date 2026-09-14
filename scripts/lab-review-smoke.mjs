@@ -25,8 +25,8 @@ const ui = readFileSync(new URL("../public/v099-lab-review.js", import.meta.url)
 const migration = readFileSync(new URL("../migrations/0010_lab_review_orchestrator.sql", import.meta.url), "utf8");
 
 assert.match(orchestrator, /PHASE0_24H/);
-assert.match(orchestrator, /UTAMA_\$\{milestone\}/);
-assert.match(orchestrator, /EUROPE/);
+assert.match(orchestrator, /MILESTONES = \[24, 50, 100, 200\]/);
+assert.match(orchestrator, /source\.toUpperCase\(\)/);
 assert.match(orchestrator, /EXTEND_COLLECTION/);
 assert.match(orchestrator, /REVIEW_READY/);
 assert.match(orchestrator, /EDGE_CANDIDATE_HUMAN_REVIEW_REQUIRED/);
@@ -36,6 +36,8 @@ assert.match(orchestrator, /getRandomnessMonteCarlo/);
 assert.match(orchestrator, /reportTableWritesOnly:\s*true/);
 assert.match(orchestrator, /automaticAiPhaseChange:\s*false/);
 assert.match(orchestrator, /automaticWeightChange:\s*false/);
+assert.match(orchestrator, /ON CONFLICT\(review_key\) DO UPDATE/);
+assert.match(orchestrator, /errors\.length === 0/);
 assert.doesNotMatch(orchestrator, /UPDATE\s+arena_forward_runs/i);
 assert.doesNotMatch(orchestrator, /UPDATE\s+keeper7_forward_runs/i);
 assert.doesNotMatch(orchestrator, /UPDATE\s+two_stage_forward_runs/i);
@@ -54,6 +56,7 @@ assert.match(ui, /RUN REVIEW NOW/);
 assert.match(ui, /HUMAN REVIEW REQUIRED/);
 assert.match(ui, /percentToNext/);
 assert.match(ui, /AUTO armed/);
+assert.match(ui, /review24h\?\.completed \? null/);
 
 assert.match(migration, /CREATE TABLE IF NOT EXISTS lab_review_reports/);
 assert.match(migration, /CREATE TABLE IF NOT EXISTS lab_review_completed_triggers/);
