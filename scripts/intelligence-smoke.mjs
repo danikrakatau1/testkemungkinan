@@ -28,6 +28,6 @@ for (const token of [
 if (!index.includes("/api/intelligence-score")) throw new Error("Intelligence endpoint missing");
 if (!index.includes("v103-intelligence.js") || !index.includes("v103-intelligence.css")) throw new Error("Intelligence UI injection missing");
 if (!ui.includes("INTELLIGENCE 🧠") || !ui.includes("NOT WIN PROBABILITY")) throw new Error("Intelligence UI guardrail missing");
-if (!wrangler.includes('main = "src/index_v103.js"')) throw new Error("wrangler main is not V1.0.3");
+if (!/main = "src\/index_v10[3-9]\.js"/.test(wrangler)) throw new Error("active worker no longer includes V1.0.3+ intelligence lineage");
 if (!wrangler.includes('crons = ["* * * * *"]')) throw new Error("1-minute cron was lost");
 console.log("prediction-intelligence smoke: PASS");
