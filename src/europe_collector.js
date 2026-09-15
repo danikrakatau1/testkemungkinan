@@ -1,4 +1,4 @@
-export const EUROPE_COLLECTOR_VERSION = "1.0.0";
+export const EUROPE_COLLECTOR_VERSION = "1.0.5";
 
 const BASE_API = "https://backend.europelotto.work/api";
 const LATEST_URL = `${BASE_API}/results/latest`;
@@ -68,6 +68,12 @@ export async function ensureEuropeSchema(db) {
 async function tableCount(db) {
   const query = await db.prepare("SELECT COUNT(*) AS n FROM europe_results_3d").all();
   return Number(query.results?.[0]?.n || 0);
+}
+
+async function latestStoredPeriod(db) {
+  const query = await db.prepare("SELECT period FROM europe_results_3d ORDER BY period DESC LIMIT 1").all();
+  const value = query.results?.[0]?.period;
+  return value == null ? null : Number(value);
 }
 
 async function upsertRows(db, rows) {
@@ -140,7 +146,30 @@ export async function collectEurope(env, options = {}) {
   await ensureEuropeSchema(db);
 
   const before = await tableCount(db);
+  const storedBefore = await latestStoredPeriod(db);
   const latest = await fetchEuropeLatest();
+
+  // V1.0.5: preserve the raw-result denominator when the source moved by more
+  // than one period. This is ACTUAL-only history recovery, never prediction
+  // recovery. Forward locks for already-known results remain permanently missing.
+  let gapFill = null;
+  if (storedBefore != null && Number(latest.period) > storedBefore + 1) {
+    const history = await fetchEuropeHistory(options.gapFillLimit || DEFAULT_BACKFILL_LIMIT);
+    const missingActuals = history
+      .filter((row) => Number(row.period) > storedBefore && Number(row.period) < Number(latest.period))
+      .sort((a, b) => a.period - b.period);
+    const write = await upsertRows(db, missingActuals);
+    gapFill = {
+      detected: true,
+      fromPeriod: storedBefore,
+      sourceLatestPeriod: Number(latest.period),
+      expectedMissing: Math.max(0, Number(latest.period) - storedBefore - 1),
+      fetchedActualRows: missingActuals.length,
+      ...write,
+      predictionBackfill: false,
+    };
+  }
+
   const liveWrite = await upsertRows(db, [latest]);
 
   let backfill = null;
@@ -165,6 +194,7 @@ export async function collectEurope(env, options = {}) {
     previous: rows[1] || null,
     draws: count,
     liveWrite,
+    gapFill,
     backfill,
     now: new Date().toISOString(),
   };
