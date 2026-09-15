@@ -1,5 +1,5 @@
 name = "testkemungkinan"
-main = "src/index_v103.js"
+main = "src/index_v104.js"
 compatibility_date = "2026-09-13"
 
 [assets]
@@ -12,6 +12,6 @@ binding = "DB"
 database_name = "testkemungkinan-db"
 database_id = "1ba40fd4-f8f8-4e3b-b38a-ee528c2d62d2"
 
-# V1.0.3 keeps V1.0.2 Continuous Draw Watchdog as the scheduled authority.
+# V1.0.4 keeps the V1.0.2+ Continuous Draw Watchdog as scheduled authority.
 [triggers]
 crons = ["* * * * *"]
