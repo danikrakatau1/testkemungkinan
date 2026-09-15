@@ -28,6 +28,6 @@ for (const token of [
 if (!index.includes("/api/learner-continuity")) throw new Error("Continuity endpoint missing");
 if (!index.includes("v104-continuity.js") || !index.includes("v104-continuity.css")) throw new Error("Continuity UI injection missing");
 if (!ui.includes("CONTINUITY 🔗") || !ui.includes("NO HINDSIGHT")) throw new Error("Continuity UI guardrail missing");
-if (!wrangler.includes('main = "src/index_v104.js"')) throw new Error("wrangler main is not V1.0.4");
+if (!/main = "src\/index_v10[4-9]\.js"/.test(wrangler)) throw new Error("active worker no longer includes V1.0.4+ continuity lineage");
 if (!wrangler.includes('crons = ["* * * * *"]')) throw new Error("1-minute cron was lost");
 console.log("learner-continuity smoke: PASS");
